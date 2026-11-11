@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature
+        android:name="android.hardware.type.automotive"
+        android:required="false" />
+
+    <!-- Vehicle SDK: 기어·누적 주행거리(CAR_DRIVE), 연료량·연비(CAR_ENERGY), 공조 사용(CAR_CLIMATE),
+         연식 추정용 차대번호(CAR_INFO, PRIVATE_CAR_INFO). 모두 읽기 권한이며 차량 제어 권한은 쓰지 않는다. -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
+    <uses-permission android:name="pleos.car.permission.CAR_CLIMATE" />
+    <uses-permission android:name="pleos.car.permission.CAR_INFO" />
+    <uses-permission android:name="pleos.car.permission.PRIVATE_CAR_INFO" />
+    <!-- NaviHelper SDK: 즐겨찾기(집·회사), 최근 목적지, 현재 위치, 경로 거리(requestTrip) -->
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
+
+    <!-- AAOS 표준 차속(PERF_VEHICLE_SPEED): 누적 주행거리 단위 사이의 거리를 채운다. 런타임 권한. -->
+    <uses-permission android:name="android.car.permission.CAR_SPEED" />
+
+    <!-- 다른 앱을 보는 동안에도 주행 기록을 이어 가고, 시동(부팅)과 함께 기록을 시작한다. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".IfEvApp"
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.IfEV">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- 주행 중에는 게이지 하나만 보여 주고 조작을 요구하지 않는다. -->
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
+        </activity>
+
+        <service
+            android:name=".RecorderService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Records the vehicle's trips (gear, odometer, fuel economy) while other apps are on screen" />
+        </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

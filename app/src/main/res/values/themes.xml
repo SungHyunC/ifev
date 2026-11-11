@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pleos background_primary (day). values-night holds the night value. -->
+    <color name="bg">#FFF7F8FA</color>
+
+    <style name="Theme.IfEV" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+</resources>

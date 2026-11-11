@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">이프EV</string>
+    <string name="channel_name">주행 기록</string>
+    <string name="recording">내 주행을 전기차로 바꿔 계산하고 있어요</string>
+</resources>

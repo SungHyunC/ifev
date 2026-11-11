@@ -1,0 +1,16 @@
+# 접수양식에는 참가자 개인정보와 서명이 들어가므로 저장소에 올리지 않는다
+proposal/
+
+# Gradle / Android Studio
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# macOS
+.DS_Store
