@@ -11,9 +11,19 @@ enum class Confidence { LOW, MEDIUM, HIGH }
 data class Monthly(
     val km: Double,
     val homeCharges: Double?,
+    /** Every fast charge: [fastRoutine] plus [fastEnRoute]. */
     val fastCharges: Double,
     val lowSocDays: Double?,
     val savingWon: Double?,
+    /**
+     * Public fast charges of everyday life (no home charger): the number the verdict looks at. From the
+     * energy of trips under 100 km, so it does not depend on when the replay happened to charge.
+     */
+    val fastRoutine: Double = fastCharges,
+    /** Fast charges on the way during long trips. */
+    val fastEnRoute: Double = 0.0,
+    /** Minutes at public fast chargers, waiting included. */
+    val fastMinutes: Double = 0.0,
 )
 
 data class MeasuredReport(
@@ -28,6 +38,13 @@ data class MeasuredReport(
     val verdict: Verdict,
     /** How many trips took their distance from each signal. */
     val distanceSources: Map<DistanceSource, Int>,
+    /** Days with at least one recorded trip. A month with two driving days says little. */
+    val drivingDays: Int = days,
+    /**
+     * Charges added because the imagined battery ended the period lower than it started (90 %). Without
+     * them a short record looks cheaper than an ordinary month: the first days run on a free full battery.
+     */
+    val steadyStateCharges: Double = 0.0,
 )
 
 data class CompareRow(val label: String, val predicted: String, val actual: String)
@@ -35,6 +52,9 @@ data class CompareRow(val label: String, val predicted: String, val actual: Stri
 object Measured {
     const val FULL_DAYS = 28
     private const val HALF_DAYS = 14
+    /** HIGH needs driving on about three days a week, MEDIUM on about two: calendar days alone do not count. */
+    private const val FULL_MIN_DRIVING_DAYS = 12
+    private const val HALF_MIN_DRIVING_DAYS = 6
     const val LONG_TRIP_KM = 100.0
     private const val LOW_SOC = 0.2
     /** Fewer recorded days than this say little about monthly distance. */
@@ -47,36 +67,68 @@ object Measured {
         prices: Prices = Prices(),
         fallbackFuelKmPerL: Double? = null,
         nowMs: Long,
+        /** False while the driver has not said whether there is a charger at home: no verdict yet. */
+        homeChargingAnswered: Boolean = true,
     ): MeasuredReport? {
         if (trips.isEmpty()) return null
         val first = trips.minOf { it.startAt }
         val last = maxOf(trips.maxOf { it.endAt }, nowMs)
         val days = (ChronoUnit.DAYS.between(day(first), day(last)) + 1).toInt().coerceAtLeast(1)
+        val drivingDays = trips.map { it.date() }.toSet().size
         val sim = BatterySim.run(model, trips, plan, prices, fallbackFuelKmPerL, nowMs)
         val scale = 30.0 / days
+
+        val enRoute = sim.enRouteFastCharges * scale
+        val home: Double?
+        val routine: Double
+        val steady: Double
+        if (plan.homeCharging) {
+            // Steady state: refill what the period took out of the starting battery, at the usual top-up.
+            val debtKwh = (plan.startSoc - sim.endSoc).coerceAtLeast(0.0) * model.batteryKwh
+            steady = debtKwh / ((plan.homeChargeTo - plan.homeChargeBelow).coerceAtLeast(0.05) * model.batteryKwh)
+            home = (sim.homeCharges + steady) * scale
+            routine = (sim.fastCharges - sim.enRouteFastCharges).coerceAtLeast(0) * scale
+        } else {
+            // Everyday public charging, by energy: what the everyday (non-long) trips used, in 30 → 80 %
+            // top-ups. Counting charge events instead depends on timing: a charge on the way to a long
+            // trip also powers the commutes after it, and the first days run on a free full battery.
+            val everydayKwh = trips.filter { it.distanceKm < LONG_TRIP_KM }
+                .sumOf { it.distanceKm * EnergyModel.kwhPerKm(model, it.tempC, it.avgSpeedKmh, it.climateShare) }
+            steady = 0.0
+            home = null
+            routine = everydayKwh / ((plan.fastChargeTo - plan.publicChargeBelow).coerceAtLeast(0.05) * model.batteryKwh) * scale
+        }
         val monthly = Monthly(
             km = sim.totalKm * scale,
-            homeCharges = if (plan.homeCharging) sim.homeCharges * scale else null,
-            fastCharges = sim.fastCharges * scale,
+            homeCharges = home,
+            fastCharges = routine + enRoute,
             lowSocDays = sim.lowSocDays * scale,
             savingWon = if (sim.fuelUnknownKm < sim.totalKm) sim.savingWon * scale else null,
+            fastRoutine = routine,
+            fastEnRoute = enRoute,
+            fastMinutes = if (plan.homeCharging) sim.fastMinutes * scale else {
+                // Everyday top-ups (30 → 80 %) by count; charges on the way as the replay timed them.
+                val perRoutine = (plan.fastChargeTo - plan.publicChargeBelow) * model.batteryKwh / plan.fastKw * 60 + plan.fastOverheadMin
+                val enRouteMinutes = if (sim.enRouteFastCharges > 0) sim.fastMinutes * sim.enRouteFastCharges / sim.fastCharges.coerceAtLeast(1) else 0.0
+                routine * perRoutine + enRouteMinutes * scale
+            },
         )
-        val fastRoutine = (sim.fastCharges - sim.enRouteFastCharges) * scale
         val longDates = trips.filter { it.distanceKm >= LONG_TRIP_KM }
             .flatMap { listOf(it.date(), day(it.endAt)) }.toSet()
         val routineLow = sim.days.count { it.minSoc < LOW_SOC && it.date !in longDates }
         val verdict = when {
+            !homeChargingAnswered -> Verdict.UNKNOWN
             plan.homeCharging && routineLow == 0 -> Verdict.GOOD
             plan.homeCharging -> Verdict.CONDITIONAL
-            fastRoutine <= Preliminary.MAX_FAST_PER_MONTH_FOR_EV -> Verdict.CONDITIONAL
+            routine <= Preliminary.MAX_FAST_PER_MONTH_FOR_EV -> Verdict.CONDITIONAL
             else -> Verdict.HYBRID_BETTER
         }
         return MeasuredReport(
             days = days,
             confidence = when {
-                days < HALF_DAYS -> Confidence.LOW
-                days < FULL_DAYS -> Confidence.MEDIUM
-                else -> Confidence.HIGH
+                days >= FULL_DAYS && drivingDays >= FULL_MIN_DRIVING_DAYS -> Confidence.HIGH
+                days >= HALF_DAYS && drivingDays >= HALF_MIN_DRIVING_DAYS -> Confidence.MEDIUM
+                else -> Confidence.LOW
             },
             sim = sim,
             monthly = monthly,
@@ -84,6 +136,8 @@ object Measured {
             routineLowDays = routineLow,
             verdict = verdict,
             distanceSources = trips.groupingBy { it.distanceSource }.eachCount(),
+            drivingDays = drivingDays,
+            steadyStateCharges = steady,
         )
     }
 
@@ -97,15 +151,20 @@ object Measured {
             km = annualKm / 12,
             homeCharges = prelim.homeChargesPerWeek?.times(30.0 / 7),
             fastCharges = prelim.fastChargesPerMonth ?: 0.0,
-            lowSocDays = 0.0,
+            // The day-one estimate does not model single days, so it makes no claim here.
+            lowSocDays = null,
             savingWon = saving,
+            fastRoutine = prelim.fastChargesPerMonth ?: 0.0,
+            // Long trips are checked one destination at a time, not per month.
+            fastEnRoute = Double.NaN,
         )
     }
 
     fun compare(predicted: Monthly?, actual: Monthly): List<CompareRow> = listOf(
         CompareRow("월 주행거리", predicted?.km?.let { "%,d km".format(it.roundToInt()) } ?: "-", "%,d km".format(actual.km.roundToInt())),
         CompareRow("집 충전", predicted?.homeCharges?.let { times(it) } ?: "-", actual.homeCharges?.let { times(it) } ?: "-"),
-        CompareRow("급속 충전", predicted?.let { times(it.fastCharges) } ?: "-", times(actual.fastCharges)),
+        CompareRow("평소 급속 충전", predicted?.let { times(it.fastRoutine) } ?: "-", times(actual.fastRoutine)),
+        CompareRow("장거리 가는 길 급속", predicted?.fastEnRoute?.takeIf { !it.isNaN() }?.let { times(it) } ?: "-", times(actual.fastEnRoute)),
         CompareRow("배터리 20% 미만인 날", predicted?.lowSocDays?.let { "%d일".format(it.roundToInt()) } ?: "-", actual.lowSocDays?.let { "%d일".format(it.roundToInt()) } ?: "-"),
         CompareRow("연료비 절감", predicted?.savingWon?.let { won(it) } ?: "-", actual.savingWon?.let { won(it) } ?: "-"),
     )
@@ -140,6 +199,9 @@ object Measured {
             low == 0 -> "배터리가 20% 아래로 떨어진 날은 없었어요."
             report.routineLowDays == 0 -> "배터리가 20% 아래로 떨어진 ${low}일은 모두 장거리 날이었어요. 평소 생활에서는 없었어요."
             else -> "장거리가 아닌 날에도 배터리가 20% 아래로 떨어진 날이 ${report.routineLowDays}일 있었어요."
+        }
+        if (actual.homeCharges == null && report.days >= MIN_COMPARE_DAYS) {
+            out += "100km 미만 평소 주행에 쓴 전기는 공공 급속 월 %.1f회 분량이에요. 장거리는 따로 셌어요.".format(actual.fastRoutine)
         }
         if (report.verdict == Verdict.HYBRID_BETTER) {
             out += "집 충전 없이 급속 충전이 잦아요. 지금 생활에는 하이브리드가 더 맞을 수 있어요."

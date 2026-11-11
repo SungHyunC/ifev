@@ -57,7 +57,16 @@ data class SimResult(
     val endSoc: Double,
     val days: List<DaySummary>,
 ) {
-    val savingWon: Double get() = fuelCostWon - evCostWon
+    /**
+     * Fuel minus electricity over the same distance. Trips without a fuel economy reading are left out
+     * of the fuel bill, so the fuel bill is scaled up to the whole distance at the economy of the trips
+     * that had one; with no reading at all there is nothing to compare and the saving is 0.
+     */
+    val savingWon: Double get() {
+        val knownKm = totalKm - fuelUnknownKm
+        if (knownKm <= 0) return 0.0
+        return fuelCostWon * totalKm / knownKm - evCostWon
+    }
 }
 
 /**

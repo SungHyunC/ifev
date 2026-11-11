@@ -4,11 +4,13 @@ import ai.pleos.playground.vehicle.Vehicle
 import ai.pleos.playground.vehicle.api.model.area.SeatArea
 import ai.pleos.playground.vehicle.constant.control.VehicleGear
 import ai.pleos.playground.vehicle.listener.DistanceDrivenListener
+import ai.pleos.playground.vehicle.listener.EvBatteryStateOfChargeListener
 import ai.pleos.playground.vehicle.listener.FuelEconomyListener
 import ai.pleos.playground.vehicle.listener.FuelPercentListener
 import ai.pleos.playground.vehicle.listener.GearSelectionListener
 import ai.pleos.playground.vehicle.listener.HvacPowerStateListener
 import android.content.Context
+import com.ifev.app.engine.kmPerLiterFromLitersPer100Km
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -22,11 +24,14 @@ sealed interface CarSignal {
     data class Gear(val parked: Boolean) : CarSignal
     data class Odometer(val km: Double) : CarSignal
     data class FuelPercent(val percent: Int) : CarSignal
-    /** Average of the trip in progress, km/L. */
+    /** Average of the trip in progress, km/L (the SDK's L/100 km converted). */
     data class TripFuelEconomy(val kmPerL: Double) : CarSignal
-    /** Long-run average, km/L. */
+    /** Long-run average, km/L (the SDK's L/100 km converted). */
     data class AverageFuelEconomy(val kmPerL: Double) : CarSignal
     data class Climate(val on: Boolean) : CarSignal
+    /** Only an EV (or plug-in) reports these. The emulator's car is an EV. */
+    data class EvSoc(val percent: Int) : CarSignal
+    data class EvEfficiency(val kmPerKwh: Double) : CarSignal
 }
 
 /** Everything the app does through the Pleos Vehicle SDK. Permissions: CAR_DRIVE, CAR_ENERGY, CAR_CLIMATE, CAR_INFO. */
@@ -66,13 +71,13 @@ class VehicleGateway(context: Context, private val log: (String) -> Unit) {
         }
         val tripEconomyListener = object : FuelEconomyListener {
             override fun onFuelEconomyUpdated(economy: Float?) {
-                if (economy != null && economy > 0f) trySend(CarSignal.TripFuelEconomy(economy.toDouble()))
+                economy?.toDouble()?.let(::kmPerLiterFromLitersPer100Km)?.let { trySend(CarSignal.TripFuelEconomy(it)) }
             }
             override fun onFailed(e: Exception) = failed("주행 연비")(e)
         }
         val averageEconomyListener = object : FuelEconomyListener {
             override fun onFuelEconomyUpdated(economy: Float?) {
-                if (economy != null && economy > 0f) trySend(CarSignal.AverageFuelEconomy(economy.toDouble()))
+                economy?.toDouble()?.let(::kmPerLiterFromLitersPer100Km)?.let { trySend(CarSignal.AverageFuelEconomy(it)) }
             }
             override fun onFailed(e: Exception) = failed("평균 연비")(e)
         }
@@ -83,7 +88,16 @@ class VehicleGateway(context: Context, private val log: (String) -> Unit) {
             override fun onFailed(e: Exception) = failed("공조")(e)
         }
 
+        val ev = vehicle.getEvBattery()
+        val socListener = object : EvBatteryStateOfChargeListener {
+            override fun onEvBatteryStateOfChargeUpdated(value: Int?) {
+                if (value != null && value in 0..100) trySend(CarSignal.EvSoc(value))
+            }
+            override fun onFailed(e: Exception) = failed("EV 배터리")(e)
+        }
+
         gear.registerGearSelection(gearListener)
+        runCatching { ev.registerEvBatteryStateOfCharge(socListener) }
         odometer.registerDistanceDriven(odoListener)
         fuel.registerFuelPercent(percentListener)
         fuel.registerCurrentFuelEconomy(tripEconomyListener)
@@ -98,8 +112,13 @@ class VehicleGateway(context: Context, private val log: (String) -> Unit) {
         gear.getCurrentGearSelectionState({ g -> if (g != null && g != VehicleGear.GEAR_UNKNOWN) trySend(CarSignal.Gear(g == VehicleGear.GEAR_PARK)) }, failed("기어 조회"))
         odometer.getCurrentDistanceDriven({ km -> if (km != null) trySend(CarSignal.Odometer(km.toDouble())) }, failed("누적 주행거리 조회"))
         fuel.getFuelPercent({ p -> if (p != null) trySend(CarSignal.FuelPercent(p)) }, failed("연료량 조회"))
-        fuel.getCumulativeFuelEconomy({ v -> if (v != null && v > 0f) trySend(CarSignal.AverageFuelEconomy(v.toDouble())) }, failed("평균 연비 조회"))
+        fuel.getCumulativeFuelEconomy({ v -> v?.toDouble()?.let(::kmPerLiterFromLitersPer100Km)?.let { trySend(CarSignal.AverageFuelEconomy(it)) } }, failed("평균 연비 조회"))
         climateArea?.let { area -> hvac.getHvacPowerState(area, { on -> if (on != null) trySend(CarSignal.Climate(on)) }, failed("공조 조회")) }
+        // A fuel car refuses these (not supported); that is expected, not an error to show.
+        runCatching {
+            ev.getEvBatteryStateOfCharge({ v -> if (v != null && v in 0..100) trySend(CarSignal.EvSoc(v)) }, { log("EV 배터리 없음: ${it.message}") })
+            ev.getCumulativeEvEfficiency({ v -> if (v != null && v in 1f..15f) trySend(CarSignal.EvEfficiency(v.toDouble())) }, { log("EV 전비 없음: ${it.message}") })
+        }
 
         awaitClose {
             runCatching { gear.unregisterGearSelection(gearListener) }
@@ -108,12 +127,13 @@ class VehicleGateway(context: Context, private val log: (String) -> Unit) {
             runCatching { fuel.unregisterCurrentFuelEconomy(tripEconomyListener) }
             runCatching { fuel.unregisterCumulativeFuelEconomy(averageEconomyListener) }
             climateArea?.let { runCatching { hvac.unregisterHvacPowerState(it, climateListener) } }
+            runCatching { ev.unregisterEvBatteryStateOfCharge(socListener) }
         }
     }
 
     /**
-     * Model year from the VIN's 10th character, read once and never stored. Needs PRIVATE_CAR_INFO;
-     * when the car refuses, the driver is asked instead.
+     * Model year from the VIN's 10th character, read once and never stored. getVINInfo needs CAR_INFO
+     * only; when the car refuses, the driver is asked instead.
      */
     suspend fun modelYear(): Int? {
         val vin = awaitOrNull<String?> { done -> vehicle.getCarInfo().getVINInfo({ done(it) }, { e -> log("차대번호 조회 실패: ${e.message}"); done(null) }) }

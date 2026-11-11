@@ -52,16 +52,18 @@ val PleosLight = PleosColors(
     textPrimary = Color(0xFF131417),
     textSecondary = Color(0xFF44464E),
     textTertiary = Color(0xFF686A72),
-    textQuaternary = Color(0xFFA4A8AE),
+    // basic_400 (A4A8AE) is 2.4:1 on white, too faint for text; basic_600 keeps 5.3:1.
+    textQuaternary = Color(0xFF686A72),
     buttonFilled = Color(0xFF44464E),
     onButtonFilled = Color(0xFFFFFFFF),
     buttonBasic = Color(0xFFEDEEF2),
     active = Color(0xFF02C265),
     positive = Color(0xFF0064FF),
     negative = Color(0xFFFE3D16),
-    ev = Color(0xFF00A99D),
+    // Text-safe on white (4.5:1 or more, as the Pleos guide asks): teal 5.3:1, amber 5.1:1.
+    ev = Color(0xFF00796F),
     evSoft = Color(0xFFDDF5F2),
-    fuel = Color(0xFFF08A00),
+    fuel = Color(0xFFA85A00),
     fuelSoft = Color(0xFFFFF0DB),
 )
 

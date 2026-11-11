@@ -26,7 +26,8 @@ object DemoScenario {
         vehicleStatus = "시연",
         naviStatus = "시연",
         parked = true,
-        odometerKm = 18_420.0,
+        // Pleos Connect cars are new (the Grandeur came first, in May 2026): about seven months old.
+        odometerKm = 9_210.0,
         fuelPercent = 54,
         averageFuelKmPerL = 13.6,
         climateOn = true,
@@ -39,10 +40,11 @@ object DemoScenario {
             Destination("수원 화성행궁", 41.0) to true,
             Destination("일산 호수공원", 22.0) to true,
         ),
-        modelYear = 2025,
+        modelYear = 2026,
     )
 
-    const val MONTHS_OWNED = 14
+    /** Entered by the driver: the model year alone does not tell when the car was bought. */
+    const val MONTHS_OWNED = 7
 
     /** First recorded day of the four weeks. */
     val firstDay: LocalDate = LocalDate.of(2026, 10, 12)

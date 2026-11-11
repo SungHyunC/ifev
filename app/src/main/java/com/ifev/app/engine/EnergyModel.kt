@@ -27,7 +27,10 @@ object EnergyModel {
         val warm = lerp(model.warm.city, model.warm.highway, hwy)
         val cold = lerp(model.cold.city, model.cold.highway, hwy)
         val coldness = ((WARM_C - tempC) / (WARM_C - COLD_TEST_C)).coerceIn(0.0, 1.0)
-        val base = if (climateOn) lerp(warm, cold, coldness) else warm * (1 - COLD_LOSS_NO_HVAC * coldness)
+        val withHeater = lerp(warm, cold, coldness)
+        // AAA's -12 % is one figure for every car; some models lose less than that even with the heater
+        // on (their certified cold range). Switching the heater off can never cost range.
+        val base = if (climateOn) withHeater else maxOf(withHeater, warm * (1 - COLD_LOSS_NO_HVAC * coldness))
         val heat = ((tempC - HOT_FROM_C) / (HOT_AAA_C - HOT_FROM_C)).coerceIn(0.0, 1.0)
         return base * (1 - (if (climateOn) HOT_LOSS_AC else HOT_LOSS_NO_AC) * heat)
     }

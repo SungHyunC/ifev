@@ -21,6 +21,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         RecorderService.start(this)
+        narrator.start()
         val missing = RUNTIME_PERMISSIONS.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 1)
         if (savedInstanceState == null) handleDemoExtra(intent)
@@ -34,6 +35,8 @@ class MainActivity : ComponentActivity() {
             onDemoDayZero = viewModel::demoDayZero,
             onDemoDrive = viewModel::demoDrive,
             onDemoFourWeeks = viewModel::demoFourWeeks,
+            onVoice = viewModel::toggleVoice,
+            onReal = viewModel::demoReal,
         )
         setContent {
             IfEvTheme {
@@ -60,6 +63,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_DEMO = "demo"
         /** Vehicle speed fills in trip distance; the notification shows recording is on. */
-        private val RUNTIME_PERMISSIONS = listOf("android.car.permission.CAR_SPEED", "android.permission.POST_NOTIFICATIONS")
+        private val RUNTIME_PERMISSIONS = listOf("android.car.permission.CAR_SPEED", "android.car.permission.CAR_ENERGY", "android.permission.POST_NOTIFICATIONS")
     }
 }

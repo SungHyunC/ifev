@@ -14,3 +14,9 @@ captures/
 
 # macOS
 .DS_Store
+
+# 참가자 실제 주행 기록: 좌표는 없지만 개인의 생활 패턴이라 저장소에 올리지 않는다
+drives/
+받은기록/
+*.gpx
+app/src/main/assets/real/

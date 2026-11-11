@@ -63,8 +63,9 @@ class MeasuredTest {
         val prelim = Preliminary.estimate(m, PrelimInput(17.3, 5, emptyList(), 18_400.0, 14, 13.8, true, 11), plan)
         val report = Measured.report(m, commuteDays(28), plan, fallbackFuelKmPerL = 13.8, nowMs = at(27, 20.0))!!
         val rows = Measured.compare(Measured.predictedMonthly(prelim), report.monthly)
-        assertEquals(5, rows.size)
-        assertTrue(rows.all { it.predicted != "-" || it.label == "배터리 20% 미만인 날" })
+        assertEquals(6, rows.size)
+        // The day-one estimate makes no claim about single low days or long-trip charging.
+        assertTrue(rows.all { it.predicted != "-" || it.label == "배터리 20% 미만인 날" || it.label == "장거리 가는 길 급속" })
     }
 
     @Test

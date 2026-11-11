@@ -6,17 +6,24 @@
         android:required="false" />
 
     <!-- Vehicle SDK: 기어·누적 주행거리(CAR_DRIVE), 연료량·연비(CAR_ENERGY), 공조 사용(CAR_CLIMATE),
-         연식 추정용 차대번호(CAR_INFO, PRIVATE_CAR_INFO). 모두 읽기 권한이며 차량 제어 권한은 쓰지 않는다. -->
+         연식 추정용 차대번호(CAR_INFO). 모두 읽기 권한이며 차량 제어 권한은 쓰지 않는다. -->
     <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
     <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
     <uses-permission android:name="pleos.car.permission.CAR_CLIMATE" />
     <uses-permission android:name="pleos.car.permission.CAR_INFO" />
-    <uses-permission android:name="pleos.car.permission.PRIVATE_CAR_INFO" />
     <!-- NaviHelper SDK: 즐겨찾기(집·회사), 최근 목적지, 현재 위치, 경로 거리(requestTrip) -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
 
+    <!-- TextToSpeech SDK(기기 내 모드): 목적지를 정할 때와 정차할 때 한 문장씩 말한다. -->
+    <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+
     <!-- AAOS 표준 차속(PERF_VEHICLE_SPEED): 누적 주행거리 단위 사이의 거리를 채운다. 런타임 권한. -->
     <uses-permission android:name="android.car.permission.CAR_SPEED" />
+    <!-- AAOS 표준 기어(GEAR_SELECTION). Pleos SDK의 Gear API가 이 속성을 쓰라고 안내한다. -->
+    <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
+    <!-- 이미 전기차인 차(에뮬레이터)의 배터리 용량·잔량: 내비 계산과 비교할 때만 쓴다. -->
+    <uses-permission android:name="android.car.permission.CAR_INFO" />
+    <uses-permission android:name="android.car.permission.CAR_ENERGY" />
 
     <!-- 다른 앱을 보는 동안에도 주행 기록을 이어 가고, 시동(부팅)과 함께 기록을 시작한다. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

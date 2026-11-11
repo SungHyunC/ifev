@@ -7,9 +7,10 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Turns the car's raw signals into [Trip]s: leaving P starts one, returning to P ends it. Distance
- * comes from the odometer; when it has not moved (coarse steps, or a car that does not report it),
- * from the integrated vehicle speed or the navigation's position track, whichever is longer.
+ * Turns the car's raw signals into [Trip]s: leaving P starts one, returning to P ends it. Distance is
+ * the longest of the odometer difference, the integrated vehicle speed and the navigation's position
+ * track: the odometer moves in coarse steps (or not at all on some cars), and the other two only ever
+ * miss distance. The same rule gives the live figure and the saved trip, so the two never disagree.
  * Clock-free (time arrives with every signal) and not thread-safe: feed it from one coroutine.
  */
 class TripRecorder(
@@ -18,7 +19,7 @@ class TripRecorder(
 ) {
     private class Open(
         val startAt: Long,
-        val startOdometer: Double?,
+        var startOdometer: Double?,
         val startPlace: Place,
         var pathKm: Double = 0.0,
         var speedKm: Double = 0.0,
@@ -37,7 +38,7 @@ class TripRecorder(
     val driving: Boolean get() = open != null
 
     /** Distance of the trip in progress, 0 when parked. */
-    val currentKm: Double get() = open?.let { o -> maxOf(odometerKm(o) ?: 0.0, o.speedKm, o.pathKm) } ?: 0.0
+    val currentKm: Double get() = open?.let(::currentKmOf) ?: 0.0
 
     /** Share of the trip in progress with the climate system on, up to [now]. */
     fun currentClimateShare(now: Long): Double {
@@ -62,7 +63,11 @@ class TripRecorder(
     }
 
     fun onOdometer(km: Double) {
-        if (km > 0) odometer = km
+        if (km < 0 || km.isNaN()) return
+        odometer = km
+        // The first reading can arrive after the car has started moving: count from here, plus what
+        // speed and position already measured.
+        open?.let { o -> if (o.startOdometer == null) o.startOdometer = km - maxOf(o.speedKm, o.pathKm) }
     }
 
     /** Vehicle speed in m/s. Integrated between samples while a trip is open. */
@@ -122,15 +127,45 @@ class TripRecorder(
 
     private fun odometerKm(o: Open): Double? {
         val odo = odometer
-        return if (o.startOdometer != null && odo != null && odo > o.startOdometer) odo - o.startOdometer else null
+        val start = o.startOdometer
+        return if (start != null && odo != null && odo > start) odo - start else null
     }
 
-    private fun currentKmOf(o: Open): Double = odometerKm(o) ?: maxOf(o.speedKm, o.pathKm)
+    private fun currentKmOf(o: Open): Double = maxOf(odometerKm(o) ?: 0.0, o.speedKm, o.pathKm)
 
-    private fun sourceOf(o: Open): DistanceSource = when {
-        odometerKm(o) != null -> DistanceSource.ODOMETER
-        o.speedKm >= o.pathKm -> DistanceSource.SPEED
-        else -> DistanceSource.TRACK
+    private fun sourceOf(o: Open): DistanceSource {
+        val odo = odometerKm(o) ?: 0.0
+        return when {
+            odo > 0 && odo >= o.speedKm && odo >= o.pathKm -> DistanceSource.ODOMETER
+            o.speedKm >= o.pathKm -> DistanceSource.SPEED
+            else -> DistanceSource.TRACK
+        }
+    }
+
+    /** The trip in progress, to survive the process being killed mid-drive. */
+    data class Snapshot(
+        val startAt: Long,
+        val startOdometer: Double?,
+        val startPlace: Place,
+        val pathKm: Double,
+        val speedKm: Double,
+        val climateMs: Long,
+        val climateOn: Boolean,
+        val savedAt: Long,
+    )
+
+    fun snapshot(now: Long): Snapshot? = open?.let { o ->
+        Snapshot(o.startAt, o.startOdometer, o.startPlace, o.pathKm, o.speedKm, o.climateMs + if (climateOn) now - o.climateSince else 0, climateOn, now)
+    }
+
+    /**
+     * Picks up a trip that was open when the process died. The time it was down is not counted as
+     * climate time, and distance driven meanwhile comes back through the odometer when the car gives one.
+     */
+    fun restore(s: Snapshot, now: Long) {
+        if (open != null) return
+        open = Open(s.startAt, s.startOdometer, s.startPlace, s.pathKm, s.speedKm, s.climateMs, climateSince = now)
+        parked = false
     }
 
     private fun here(): Place = position?.let { (lat, lon) -> placeOf(lat, lon) } ?: Place.OTHER

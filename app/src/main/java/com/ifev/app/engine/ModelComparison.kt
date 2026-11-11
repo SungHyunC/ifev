@@ -22,6 +22,7 @@ object ModelComparison {
         fallbackFuelKmPerL: Double? = null,
         nowMs: Long,
         models: List<EvModel> = EvCatalog.all,
+        homeChargingAnswered: Boolean = true,
     ): List<ModelRow> = models.map { m ->
         val prelim = Preliminary.estimate(m, input, plan, prices)
         val far = prelim.destinations.firstOrNull()
@@ -30,7 +31,7 @@ object ModelComparison {
             prelim = prelim,
             farthestStopsNow = far?.stopsNow,
             farthestStopsWinter = far?.stopsWinter,
-            measured = Measured.report(m, trips, plan, prices, fallbackFuelKmPerL, nowMs),
+            measured = Measured.report(m, trips, plan, prices, fallbackFuelKmPerL, nowMs, homeChargingAnswered),
         )
     }
 }

@@ -182,5 +182,6 @@ object Preliminary {
     /** Product threshold, not a study result: about one public fast charge a week. Shown to the driver as an assumption. */
     const val MAX_FAST_PER_MONTH_FOR_EV = 4.5
 
-    private const val MIN_COMMUTE_KM = 0.5
+    /** Home and office saved closer than this are the same place, not a commute. */
+    const val MIN_COMMUTE_KM = 0.5
 }

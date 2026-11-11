@@ -36,11 +36,18 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.all {
+            // ./gradlew :app:testDebugUnitTest --tests '*RealDriveReplay*' -Pdrives=/절대/경로 --rerun
+            it.systemProperty("ifev.drives", (project.findProperty("drives") ?: "").toString())
+        }
+    }
 }
 
 dependencies {
     implementation(libs.pleos.vehicle)
     implementation(libs.pleos.navihelper)
+    implementation(libs.pleos.tts)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -55,4 +62,6 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    // org.json is only a stub in local unit tests; the real one reads recorded drives there.
+    testImplementation(libs.org.json)
 }

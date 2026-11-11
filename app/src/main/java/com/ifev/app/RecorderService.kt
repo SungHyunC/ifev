@@ -13,12 +13,16 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import com.ifev.app.data.LiveRecorder
+import com.ifev.app.data.Narrator
+import com.ifev.app.vehicle.Voice
 
 class IfEvApp : Application() {
     val recorder by lazy { LiveRecorder(this) }
+    val narrator by lazy { Narrator(recorder, Voice(this) { android.util.Log.d("IfEV", it) }) }
 }
 
 val Context.recorder: LiveRecorder get() = (applicationContext as IfEvApp).recorder
+val Context.narrator: Narrator get() = (applicationContext as IfEvApp).narrator
 
 /**
  * Keeps trip recording alive while the driver uses the navigation or other apps. The app has no
@@ -44,6 +48,7 @@ class RecorderService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         recorder.start()
+        narrator.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY

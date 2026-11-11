@@ -109,6 +109,16 @@ object EvCatalog {
 /** 아이오닉 6 롱레인지(84kWh) 인증 저온 453 ÷ 상온 568. */
 private const val IONIQ6_COLD_RATIO = 453.0 / 568.0
 
+/**
+ * How long the car has probably been on the road, from its model year alone (the VIN says nothing
+ * about the purchase date). A model year goes on sale around the middle of the year before: a car
+ * bought in the second half of 2026 is usually a 2027 model. Counting from 1 January of the model
+ * year would make new cars look younger than they are, down to "1 month" for next year's model, and
+ * multiply their yearly distance. The driver can correct it on screen.
+ */
+fun monthsOnRoad(modelYear: Int, today: java.time.LocalDate): Int =
+    java.time.temporal.ChronoUnit.MONTHS.between(java.time.LocalDate.of(modelYear - 1, 7, 1), today).toInt().coerceAtLeast(1)
+
 /** The car being driven now, for its certified fuel economy when the car does not report its own. */
 data class FuelCar(val id: String, val label: String, val certifiedKmPerL: Double)
 
@@ -123,6 +133,14 @@ object FuelCarCatalog {
 }
 
 enum class FuelSource { CAR, CERTIFIED, NONE }
+
+/**
+ * The Pleos Vehicle SDK reports fuel economy in L/100 km (Fuel.getCumulativeFuelEconomy and the
+ * FuelEconomyListener say so), the AAOS convention; Korean drivers and this app think in km/L.
+ * Values outside 1–40 L/100 km (2.5–100 km/L) are not a running car's average and are dropped.
+ */
+fun kmPerLiterFromLitersPer100Km(litersPer100Km: Double): Double? =
+    if (litersPer100Km.isFinite() && litersPer100Km in 1.0..40.0) 100.0 / litersPer100Km else null
 
 /**
  * The fuel economy to compare against: the car's own long-run average when it reports one,

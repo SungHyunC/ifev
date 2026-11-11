@@ -4,6 +4,7 @@ import android.content.Context
 import com.ifev.app.engine.DistanceSource
 import com.ifev.app.engine.Place
 import com.ifev.app.engine.Trip
+import com.ifev.app.engine.TripRecorder
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -16,6 +17,8 @@ data class Settings(
     val monthsFromVin: Boolean = false,
     /** The car being driven, asked only when the car does not report its own fuel economy. */
     val myCarId: String? = null,
+    /** One spoken line when a destination is set and when parking. */
+    val voiceOn: Boolean = true,
 )
 
 /**
@@ -26,6 +29,7 @@ data class Settings(
 class Store(context: Context) {
     private val prefs = context.getSharedPreferences("ifev", Context.MODE_PRIVATE)
     private val tripsFile = File(context.filesDir, "trips.json")
+    private val openFile = File(context.filesDir, "open_trip.json")
 
     fun settings() = Settings(
         modelId = prefs.getString(KEY_MODEL, null),
@@ -33,6 +37,7 @@ class Store(context: Context) {
         monthsOwned = prefs.getInt(KEY_MONTHS, -1).takeIf { it > 0 },
         monthsFromVin = prefs.getBoolean(KEY_MONTHS_VIN, false),
         myCarId = prefs.getString(KEY_MY_CAR, null),
+        voiceOn = prefs.getBoolean(KEY_VOICE, true),
     )
 
     fun save(s: Settings) {
@@ -42,6 +47,7 @@ class Store(context: Context) {
             .putInt(KEY_MONTHS, s.monthsOwned ?: -1)
             .putBoolean(KEY_MONTHS_VIN, s.monthsFromVin)
             .putString(KEY_MY_CAR, s.myCarId)
+            .putBoolean(KEY_VOICE, s.voiceOn)
             .apply()
     }
 
@@ -56,16 +62,60 @@ class Store(context: Context) {
 
     @Synchronized
     fun append(trip: Trip) {
-        val arr = runCatching { JSONArray(tripsFile.readText()) }.getOrDefault(JSONArray())
+        val arr = if (!tripsFile.exists()) JSONArray() else runCatching { JSONArray(tripsFile.readText()) }.getOrElse {
+            // Keep a damaged file aside instead of writing over every trip recorded so far.
+            tripsFile.renameTo(File(tripsFile.parentFile, "trips.damaged-${System.currentTimeMillis()}.json"))
+            JSONArray()
+        }
         arr.put(trip.toJson())
-        val tmp = File(tripsFile.parentFile, "trips.json.tmp")
-        tmp.writeText(arr.toString())
-        tmp.renameTo(tripsFile)
+        writeAtomically(tripsFile, arr.toString())
     }
 
     @Synchronized
     fun clearTrips() {
         tripsFile.delete()
+        clearOpenTrip()
+    }
+
+    /** The trip in progress, written every few seconds while driving. */
+    @Synchronized
+    fun saveOpenTrip(s: TripRecorder.Snapshot) {
+        val json = JSONObject()
+            .put("s", s.startAt).put("o", s.startOdometer ?: JSONObject.NULL).put("from", s.startPlace.name)
+            .put("path", s.pathKm).put("speed", s.speedKm).put("cms", s.climateMs).put("con", s.climateOn).put("at", s.savedAt)
+        writeAtomically(openFile, json.toString())
+    }
+
+    @Synchronized
+    fun openTrip(): TripRecorder.Snapshot? {
+        if (!openFile.exists()) return null
+        return runCatching {
+            val j = JSONObject(openFile.readText())
+            TripRecorder.Snapshot(
+                startAt = j.getLong("s"),
+                startOdometer = if (j.isNull("o")) null else j.getDouble("o"),
+                startPlace = Place.valueOf(j.getString("from")),
+                pathKm = j.getDouble("path"),
+                speedKm = j.getDouble("speed"),
+                climateMs = j.getLong("cms"),
+                climateOn = j.getBoolean("con"),
+                savedAt = j.getLong("at"),
+            )
+        }.getOrNull()
+    }
+
+    @Synchronized
+    fun clearOpenTrip() {
+        openFile.delete()
+    }
+
+    private fun writeAtomically(target: File, text: String) {
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        tmp.writeText(text)
+        if (!tmp.renameTo(target)) {
+            target.writeText(text)
+            tmp.delete()
+        }
     }
 
     private fun Trip.toJson() = JSONObject()
@@ -93,5 +143,6 @@ class Store(context: Context) {
         const val KEY_MONTHS = "monthsOwned"
         const val KEY_MONTHS_VIN = "monthsFromVin"
         const val KEY_MY_CAR = "myCar"
+        const val KEY_VOICE = "voice"
     }
 }
