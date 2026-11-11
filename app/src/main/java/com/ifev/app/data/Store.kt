@@ -1,6 +1,7 @@
 package com.ifev.app.data
 
 import android.content.Context
+import com.ifev.app.engine.DistanceSource
 import com.ifev.app.engine.Place
 import com.ifev.app.engine.Trip
 import org.json.JSONArray
@@ -13,6 +14,8 @@ data class Settings(
     val monthsOwned: Int? = null,
     /** True when [monthsOwned] came from the VIN, not from the driver. */
     val monthsFromVin: Boolean = false,
+    /** The car being driven, asked only when the car does not report its own fuel economy. */
+    val myCarId: String? = null,
 )
 
 /**
@@ -29,6 +32,7 @@ class Store(context: Context) {
         homeCharging = when (prefs.getInt(KEY_HOME, -1)) { 1 -> true; 0 -> false; else -> null },
         monthsOwned = prefs.getInt(KEY_MONTHS, -1).takeIf { it > 0 },
         monthsFromVin = prefs.getBoolean(KEY_MONTHS_VIN, false),
+        myCarId = prefs.getString(KEY_MY_CAR, null),
     )
 
     fun save(s: Settings) {
@@ -37,6 +41,7 @@ class Store(context: Context) {
             .putInt(KEY_HOME, when (s.homeCharging) { true -> 1; false -> 0; null -> -1 })
             .putInt(KEY_MONTHS, s.monthsOwned ?: -1)
             .putBoolean(KEY_MONTHS_VIN, s.monthsFromVin)
+            .putString(KEY_MY_CAR, s.myCarId)
             .apply()
     }
 
@@ -68,6 +73,7 @@ class Store(context: Context) {
         .put("from", startPlace.name).put("to", endPlace.name)
         .put("t", tempC).put("c", climateShare)
         .put("f", fuelKmPerL ?: JSONObject.NULL)
+        .put("ds", distanceSource.name)
 
     private fun JSONObject.toTrip() = Trip(
         startAt = getLong("s"),
@@ -78,6 +84,7 @@ class Store(context: Context) {
         tempC = getDouble("t"),
         climateShare = getDouble("c"),
         fuelKmPerL = if (isNull("f")) null else getDouble("f"),
+        distanceSource = optString("ds").let { s -> DistanceSource.entries.firstOrNull { it.name == s } ?: DistanceSource.UNKNOWN },
     )
 
     private companion object {
@@ -85,5 +92,6 @@ class Store(context: Context) {
         const val KEY_HOME = "homeCharging"
         const val KEY_MONTHS = "monthsOwned"
         const val KEY_MONTHS_VIN = "monthsFromVin"
+        const val KEY_MY_CAR = "myCar"
     }
 }

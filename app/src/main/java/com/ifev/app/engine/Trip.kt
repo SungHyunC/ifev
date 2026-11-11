@@ -6,6 +6,14 @@ import java.time.ZoneId
 
 enum class Place { HOME, OFFICE, OTHER }
 
+/** Where a trip's distance came from, kept so the real car can show which signal it actually gives. */
+enum class DistanceSource {
+    ODOMETER, SPEED, TRACK,
+
+    /** Recorded before the source was kept. */
+    UNKNOWN,
+}
+
 /** One drive from leaving park to parking again, as the car recorded it. */
 data class Trip(
     val startAt: Long,
@@ -19,6 +27,7 @@ data class Trip(
     val climateShare: Double,
     /** The car's own fuel economy for the trip, km/L, when it reported one. */
     val fuelKmPerL: Double?,
+    val distanceSource: DistanceSource = DistanceSource.ODOMETER,
 ) {
     val hours: Double get() = ((endAt - startAt) / 3_600_000.0).coerceAtLeast(1.0 / 60)
     val avgSpeedKmh: Double get() = distanceKm / hours

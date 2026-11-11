@@ -26,6 +26,8 @@ data class MeasuredReport(
     /** Days under 20 % that had no long trip: the everyday routine falling short. */
     val routineLowDays: Int,
     val verdict: Verdict,
+    /** How many trips took their distance from each signal. */
+    val distanceSources: Map<DistanceSource, Int>,
 )
 
 data class CompareRow(val label: String, val predicted: String, val actual: String)
@@ -81,6 +83,7 @@ object Measured {
             longTrips = trips.count { it.distanceKm >= LONG_TRIP_KM },
             routineLowDays = routineLow,
             verdict = verdict,
+            distanceSources = trips.groupingBy { it.distanceSource }.eachCount(),
         )
     }
 

@@ -13,7 +13,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +33,10 @@ import com.ifev.app.R
 import com.ifev.app.engine.Confidence
 import com.ifev.app.engine.EvCatalog
 import com.ifev.app.engine.EvModel
+import com.ifev.app.engine.FuelCar
+import com.ifev.app.engine.FuelCarCatalog
+import com.ifev.app.engine.FuelSource
+import com.ifev.app.engine.DistanceSource
 import com.ifev.app.engine.KmSource
 import com.ifev.app.engine.Measured
 import com.ifev.app.engine.Prices
@@ -42,6 +50,7 @@ class Actions(
     val onTab: (Tab) -> Unit,
     val onModel: (EvModel) -> Unit,
     val onHomeCharging: (Boolean) -> Unit,
+    val onMyCar: (FuelCar) -> Unit,
     val onMonths: (Int) -> Unit,
     val onDemoDayZero: () -> Unit,
     val onDemoDrive: () -> Unit,
@@ -73,14 +82,6 @@ private fun TopBar(ui: UiState, actions: Actions) {
             Label("내 차가 전기차였다면", style = PleosType.labelSmall)
         }
         Spacer(Modifier.weight(1f))
-        if (!ui.car.driving) {
-            Segmented(
-                options = EvCatalog.all.map { "${it.name} ${it.trim.substringBefore(" ")} ${it.batteryKwh.roundToInt()}kWh" },
-                selected = EvCatalog.all.indexOf(ui.model).coerceAtLeast(0),
-                onSelect = { actions.onModel(EvCatalog.all[it]) },
-            )
-            Spacer(Modifier.width(24.dp))
-        }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             StatusDot("차량 ${ui.car.vehicleStatus}", ui.car.vehicleStatus == "연결됨" || ui.mode == Mode.DEMO)
             StatusDot("내비 ${ui.car.naviStatus}", ui.car.naviStatus == "연결됨" || ui.mode == Mode.DEMO)
@@ -97,6 +98,7 @@ private fun DemoBar(stage: Stage, actions: Actions) {
         PleosButton("① 설치 직후", stage == Stage.DAY_ZERO, actions.onDemoDayZero)
         PleosButton("② 출근길 주행", stage == Stage.DRIVING, actions.onDemoDrive)
         PleosButton("③ 4주 뒤", stage == Stage.FOUR_WEEKS, actions.onDemoFourWeeks)
+        Label("시연의 2~4주 기록은 가상 데이터예요. 실시간 모드의 기록만 실제 주행이에요.", style = PleosType.labelSmall, modifier = Modifier.padding(start = 8.dp))
     }
 }
 
@@ -110,7 +112,7 @@ private fun DrivingView(ui: UiState) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             Gauge(Modifier.weight(1f), "지금 이 차 · 연료", ui.car.fuelPercent?.div(100.0), c.fuel)
-            Gauge(Modifier.weight(1f), "${ui.model.name} ${ui.model.trim.substringBefore(" ")}였다면 · 배터리", ui.ghostSoc, c.ev)
+            Gauge(Modifier.weight(1f), "${ui.model.shortLabel}였다면 · 배터리", ui.ghostSoc, c.ev)
         }
         Card(Modifier.fillMaxWidth()) {
             Text(
@@ -142,6 +144,8 @@ private fun Gauge(modifier: Modifier, title: String, level: Double?, color: andr
 @Composable
 private fun ParkedView(ui: UiState, actions: Actions) {
     val days = ui.report?.days ?: 0
+    ModelPicker(ui, actions)
+    Spacer(Modifier.height(16.dp))
     Segmented(
         options = listOf("① 예비 진단", "② 실측 기록 · ${days}일", "③ 확정 리포트"),
         selected = ui.tab.ordinal,
@@ -152,7 +156,7 @@ private fun ParkedView(ui: UiState, actions: Actions) {
         when (ui.tab) {
             Tab.PRELIM -> PrelimView(ui, actions)
             Tab.MEASURED -> MeasuredView(ui)
-            Tab.REPORT -> ReportView(ui)
+            Tab.REPORT -> ReportView(ui, actions)
         }
         Spacer(Modifier.height(24.dp))
     }
@@ -162,6 +166,7 @@ private fun ParkedView(ui: UiState, actions: Actions) {
 private fun PrelimView(ui: UiState, actions: Actions) {
     val c = LocalPleosColors.current
     val p = ui.prelim
+    CarFacts(ui)
     Questions(ui, actions)
     Card(Modifier.fillMaxWidth()) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -169,7 +174,12 @@ private fun PrelimView(ui: UiState, actions: Actions) {
             Badge("신뢰도 낮음 · 차와 내비에 이미 있는 기록", c.textTertiary, c.surfaceHigh)
         }
         Spacer(Modifier.height(16.dp))
-        Text(p.verdict.title, style = PleosType.headline, color = verdictColor(p.verdict))
+        val title = when {
+            p.verdict != Verdict.UNKNOWN -> p.verdict.title
+            ui.settings.homeCharging == null -> "집에서 충전할 수 있는지 알려 주세요"
+            else -> "주행거리를 알면 바로 계산할게요"
+        }
+        Text(title, style = PleosType.headline, color = verdictColor(p.verdict))
         Spacer(Modifier.height(8.dp))
         Text(prelimChargeLine(ui), style = PleosType.body, color = c.textSecondary)
     }
@@ -193,13 +203,14 @@ private fun PrelimView(ui: UiState, actions: Actions) {
         Stat(
             "연료비 절감",
             if (low != null && high != null) "연 ${manwonRange(low, high)}" else "-",
-            ui.car.averageFuelKmPerL?.let { "내 차 평균 %.1fkm/L와 비교".format(it) } ?: "평균 연비를 아직 몰라요",
+            fuelCaption(ui),
             color = c.ev,
         )
     }
+    ModelTable(ui, actions, measured = false)
     if (p.destinations.isNotEmpty()) {
         Card(Modifier.fillMaxWidth()) {
-            Text("최근 목적지, 전기차로 다녀온다면", style = PleosType.bodyStrong, color = c.textPrimary)
+            Text("최근 목적지, ${ui.model.shortLabel}로 다녀온다면", style = PleosType.bodyStrong, color = c.textPrimary)
             Spacer(Modifier.height(16.dp))
             p.destinations.forEachIndexed { i, d ->
                 val routed = ui.car.destinations.firstOrNull { it.first == d.destination }?.second == true
@@ -221,7 +232,8 @@ private fun PrelimView(ui: UiState, actions: Actions) {
         Spacer(Modifier.height(12.dp))
         Bullets(
             p.assumptions + listOf(
-                "${ui.model.label} ${ui.model.batteryKwh.roundToInt()}kWh, 환경부 인증 상온 ${ui.model.warm.combined.roundToInt()}km·저온 ${ui.model.cold.combined.roundToInt()}km",
+                "${ui.model.label}: ${ui.model.source}",
+                "충전 습관(가정): 집에 4시간 이상 세울 때 50% 아래면 90%까지, 집 충전이 없으면 30% 아래에서 급속 80%까지, 10% 아래로는 계획하지 않음",
             ),
             style = PleosType.label,
             color = c.textTertiary,
@@ -260,6 +272,19 @@ private fun Questions(ui: UiState, actions: Actions) {
             )
             PleosButton("+", false, { actions.onMonths(1) })
         }
+        if (ui.fuelSource != FuelSource.CAR) {
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("지금 타는 차는?", style = PleosType.bodySmallStrong, color = c.textPrimary)
+                    Label("이 차는 연비를 알려 주지 않아요. 공인 복합연비로 대신 계산해요.", style = PleosType.labelSmall)
+                }
+                FuelCarCatalog.all.forEach { car ->
+                    Spacer(Modifier.width(12.dp))
+                    PleosButton("${car.label} ${car.certifiedKmPerL}km/L", ui.myCar == car, { actions.onMyCar(car) })
+                }
+            }
+        }
     }
 }
 
@@ -290,6 +315,8 @@ private fun MeasuredView(ui: UiState) {
         LevelBar(r.days / Measured.FULL_DAYS.toDouble(), c.ev)
         Spacer(Modifier.height(12.dp))
         Label("기록된 주행 ${ui.tripCount}번 · 총 %,.1f km · 가상 배터리 지금 ${(r.sim.endSoc * 100).roundToInt()}%%".format(r.sim.totalKm))
+        Spacer(Modifier.height(4.dp))
+        Label(distanceSourceLine(r.distanceSources), style = PleosType.labelSmall)
     }
     Card(Modifier.fillMaxWidth()) {
         Text("예비 진단과 비교하면", style = PleosType.bodyStrong, color = c.textPrimary)
@@ -319,7 +346,7 @@ private fun MeasuredView(ui: UiState) {
 }
 
 @Composable
-private fun ReportView(ui: UiState) {
+private fun ReportView(ui: UiState, actions: Actions) {
     val c = LocalPleosColors.current
     val r = ui.report
     if (r == null) {
@@ -332,9 +359,10 @@ private fun ReportView(ui: UiState) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Badge("확정 진단", c.ev, c.evSoft)
             Badge("실측 ${r.days}일 · 신뢰도 ${confidenceLabel(r.confidence)}", c.textTertiary, c.surfaceHigh)
+            if (ui.mode == Mode.DEMO) Badge("시연용 가상 데이터", c.negative, c.surfaceHigh)
         }
         Spacer(Modifier.height(16.dp))
-        Text("지난 30일, 이 차가 ${ui.model.name} ${ui.model.trim.substringBefore(" ")}였다면", style = PleosType.title, color = c.textSecondary)
+        Text("지난 30일, 이 차가 ${ui.model.shortLabel}였다면", style = PleosType.title, color = c.textSecondary)
         Spacer(Modifier.height(8.dp))
         Text(r.verdict.title, style = PleosType.headline, color = verdictColor(r.verdict))
         Spacer(Modifier.height(20.dp))
@@ -371,6 +399,7 @@ private fun ReportView(ui: UiState) {
         Spacer(Modifier.height(12.dp))
         Bullets(ui.insights)
     }
+    ModelTable(ui, actions, measured = true)
     Label("충전 요금은 2026년 8월 공공 충전요금, 휘발유는 오피넷 평균 기준. 실제 비용은 요금제와 운전 습관에 따라 달라요.", style = PleosType.labelSmall)
 }
 
@@ -400,7 +429,7 @@ private fun prelimChargeLine(ui: UiState): String {
     val p = ui.prelim
     val weekly = p.weeklyKm?.let { "한 주 약 %,d km".format(it.roundToInt()) }
     return when {
-        weekly == null -> "주행거리를 알면 계산할 수 있어요."
+        weekly == null -> "이 차가 누적 주행거리를 주지 않고 집·회사 거리도 아직 몰라요. 주행 기록이 쌓이면 실측 탭에서 계산해요."
         p.homeChargesPerWeek != null -> "$weekly → 집에서 주 %.1f회 충전 (50%%에서 90%%까지)".format(p.homeChargesPerWeek)
         p.fastChargesPerMonth != null -> "$weekly → 공공 급속 월 %.1f회 (30%%에서 80%%까지)".format(p.fastChargesPerMonth)
         else -> "$weekly · 집 충전 여부를 알려 주시면 충전 횟수를 계산해요."
@@ -421,3 +450,141 @@ private fun confidenceLabel(c: Confidence) = when (c) {
     Confidence.HIGH -> "높음"
 }
 
+
+
+// ───────────────────────────── vehicle-specific pieces ─────────────────────────────
+
+/** The day-one inputs the car gave without asking: the reason this is a car app, not a phone calculator. */
+@Composable
+private fun CarFacts(ui: UiState) {
+    val c = LocalPleosColors.current
+    val read = ui.carFacts.count { it.value != null }
+    Card(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("입력 없이 차에서 읽은 것", style = PleosType.bodyStrong, color = c.textPrimary)
+            Spacer(Modifier.width(12.dp))
+            Badge("${read}/${ui.carFacts.size}", c.ev, c.evSoft)
+            Spacer(Modifier.weight(1f))
+            Label(if (ui.fuelSource == FuelSource.CAR) "물어보는 것은 집 충전 가능 여부 하나예요" else "물어보는 것: 집 충전 여부, 지금 타는 차")
+        }
+        Spacer(Modifier.height(12.dp))
+        ui.carFacts.chunked(4).forEach { row ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                row.forEach { f ->
+                    Column(Modifier.weight(1f)) {
+                        Label(f.label, style = PleosType.labelSmall)
+                        Text(f.value ?: "이 차는 주지 않음", style = PleosType.bodySmallStrong, color = if (f.value != null) c.textPrimary else c.textQuaternary)
+                        Label(f.api, style = PleosType.labelSmall, color = c.textQuaternary)
+                    }
+                }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelPicker(ui: UiState, actions: Actions) {
+    val c = LocalPleosColors.current
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Label("비교할 현대 전기차", modifier = Modifier.padding(end = 6.dp))
+        EvCatalog.all.forEach { m ->
+            val on = m == ui.model
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (on) c.evSoft else c.surface)
+                    .clickable { actions.onModel(m) }
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    "${m.name} ${m.batteryKwh.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }}kWh",
+                    style = if (on) PleosType.labelStrong else PleosType.label,
+                    color = if (on) c.ev else c.textSecondary,
+                )
+            }
+        }
+    }
+}
+
+/** Every Hyundai EV on the same facts (day one) or the same recorded trips (measured). Tap a row to switch. */
+@Composable
+private fun ModelTable(ui: UiState, actions: Actions, measured: Boolean) {
+    val c = LocalPleosColors.current
+    Card(Modifier.fillMaxWidth()) {
+        Text(if (measured) "같은 30일, 현대 전기차별로 보면" else "현대 전기차별로 보면", style = PleosType.bodyStrong, color = c.textPrimary)
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Label("차종", modifier = Modifier.weight(1.5f))
+            Label("판정", modifier = Modifier.weight(1.3f))
+            Label(if (measured) "30일 충전" else "충전", modifier = Modifier.weight(1f))
+            Label(if (measured) "20% 미만" else "가장 먼 목적지 (지금/1월)", modifier = Modifier.weight(1.2f))
+            Label(if (measured) "월 절감" else "연 절감", modifier = Modifier.weight(1f))
+        }
+        ui.modelRows.forEach { row ->
+            val on = row.model == ui.model
+            val p = row.prelim
+            val m = row.measured
+            Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(if (on) c.evSoft else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable { actions.onModel(row.model) }
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "${row.model.name} ${row.model.trim.substringBefore(" ")}" + if (row.model.estimated) " *" else "",
+                    style = PleosType.bodySmallStrong, color = c.textPrimary, modifier = Modifier.weight(1.5f),
+                )
+                val verdict = if (measured && m != null) m.verdict else p.verdict
+                Text(shortVerdict(verdict), style = PleosType.bodySmall, color = verdictColor(verdict), modifier = Modifier.weight(1.3f))
+                val charge = if (measured && m != null) {
+                    "집 %.0f · 급속 %.0f".format(m.monthly.homeCharges ?: 0.0, m.monthly.fastCharges)
+                } else {
+                    p.homeChargesPerWeek?.let { "집 주 %.1f회".format(it) } ?: p.fastChargesPerMonth?.let { "급속 월 %.1f회".format(it) } ?: "-"
+                }
+                Text(charge, style = PleosType.bodySmall, color = c.textSecondary, modifier = Modifier.weight(1f))
+                val far = if (measured && m != null) "%.0f일".format(m.monthly.lowSocDays ?: 0.0)
+                else if (row.farthestStopsNow != null) "${stopsShort(row.farthestStopsNow)} / ${stopsShort(row.farthestStopsWinter ?: 0)}" else "-"
+                Text(far, style = PleosType.bodySmall, color = c.textSecondary, modifier = Modifier.weight(1.2f))
+                val saving = if (measured && m != null) m.monthly.savingWon?.let { manwon(it) }
+                else p.annualSavingLow?.let { low -> p.annualSavingHigh?.let { high -> manwonRange(low, high) } }
+                Text(saving ?: "-", style = PleosType.bodySmall, color = c.ev, modifier = Modifier.weight(1f))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Label("* 공개 인증값이 일부 없어 추정한 차종이에요. 계산 근거에 어떤 값을 추정했는지 적어 두었어요. 행을 누르면 그 차종으로 바뀌어요.", style = PleosType.labelSmall)
+    }
+}
+
+private fun shortVerdict(v: Verdict) = when (v) {
+    Verdict.GOOD -> "집 충전이면 충분"
+    Verdict.CONDITIONAL -> "급속 충전 필요"
+    Verdict.HYBRID_BETTER -> "하이브리드 권장"
+    Verdict.UNKNOWN -> "-"
+}
+
+private fun stopsShort(n: Int) = if (n == 0) "충전 없이" else "급속 ${n}회"
+
+private fun fuelCaption(ui: UiState): String = when (ui.fuelSource) {
+    FuelSource.CAR -> "차가 기록한 평균 %.1fkm/L와 비교".format(ui.fuelKmPerL)
+    FuelSource.CERTIFIED -> "${ui.myCar?.label} 공인 %.1fkm/L와 비교 (차가 연비를 주지 않음)".format(ui.fuelKmPerL)
+    FuelSource.NONE -> "이 차는 연비를 주지 않아요. 지금 타는 차를 골라 주세요"
+}
+
+/** Which signal each recorded trip took its distance from; on a real car this shows whether the odometer works. */
+private fun distanceSourceLine(sources: Map<DistanceSource, Int>): String {
+    val parts = listOfNotNull(
+        sources[DistanceSource.ODOMETER]?.let { "누적 주행거리 $it" },
+        sources[DistanceSource.SPEED]?.let { "차속 적분 $it" },
+        sources[DistanceSource.TRACK]?.let { "내비 위치 $it" },
+        sources[DistanceSource.UNKNOWN]?.let { "출처 미기록 $it" },
+    )
+    return "거리 출처: " + parts.joinToString(" · ") + "번"
+}

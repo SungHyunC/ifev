@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
             onTab = viewModel::selectTab,
             onModel = viewModel::selectModel,
             onHomeCharging = viewModel::answerHomeCharging,
+            onMyCar = viewModel::selectMyCar,
             onMonths = viewModel::adjustMonths,
             onDemoDayZero = viewModel::demoDayZero,
             onDemoDrive = viewModel::demoDrive,

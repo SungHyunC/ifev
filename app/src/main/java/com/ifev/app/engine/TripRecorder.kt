@@ -116,6 +116,7 @@ class TripRecorder(
             tempC = tempAt(o.startAt),
             climateShare = (o.climateMs.toDouble() / durationMs).coerceIn(0.0, 1.0),
             fuelKmPerL = tripFuelKmPerL,
+            distanceSource = sourceOf(o),
         )
     }
 
@@ -125,6 +126,12 @@ class TripRecorder(
     }
 
     private fun currentKmOf(o: Open): Double = odometerKm(o) ?: maxOf(o.speedKm, o.pathKm)
+
+    private fun sourceOf(o: Open): DistanceSource = when {
+        odometerKm(o) != null -> DistanceSource.ODOMETER
+        o.speedKm >= o.pathKm -> DistanceSource.SPEED
+        else -> DistanceSource.TRACK
+    }
 
     private fun here(): Place = position?.let { (lat, lon) -> placeOf(lat, lon) } ?: Place.OTHER
 

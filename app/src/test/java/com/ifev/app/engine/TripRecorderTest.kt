@@ -37,6 +37,7 @@ class TripRecorderTest {
         assertEquals(Place.OFFICE, t.endPlace)
         assertEquals(12.4, t.fuelKmPerL!!, 1e-9)
         assertEquals(7.5, t.tempC, 1e-9)
+        assertEquals(DistanceSource.ODOMETER, t.distanceSource)
     }
 
     @Test
@@ -51,6 +52,7 @@ class TripRecorderTest {
         val t = r.onGear(isPark = true, at = 30 * 60_000L)!!
         assertEquals(expected, t.distanceKm, 1e-9)
         assertEquals(Place.OFFICE, t.endPlace)
+        assertEquals(DistanceSource.TRACK, t.distanceSource)
     }
 
     @Test
@@ -95,6 +97,7 @@ class TripRecorderTest {
         assertEquals(1.18, r.currentKm, 0.03)
         val t = r.onGear(isPark = true, at = 61_000)!!
         assertEquals(1.2, t.distanceKm, 0.03)
+        assertEquals(DistanceSource.SPEED, t.distanceSource)
     }
 
     @Test

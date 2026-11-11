@@ -22,13 +22,15 @@ data class PrelimInput(
     val homeCharging: Boolean?,
     /** Current month, 1..12. */
     val month: Int,
+    /** True when [fuelKmPerL] is the certified figure of the picked model, not the car's own average. */
+    val fuelIsCertified: Boolean = false,
 )
 
 enum class Verdict(val title: String) {
     GOOD("집 충전이면 충분해요"),
     CONDITIONAL("급속 충전을 생활에 넣으면 가능해요"),
     HYBRID_BETTER("지금 생활엔 하이브리드가 더 맞아요"),
-    UNKNOWN("두 가지만 알려 주세요"),
+    UNKNOWN("아직 판단할 수 없어요"),
 }
 
 enum class KmSource { ODOMETER, COMMUTE, NONE }
@@ -118,7 +120,11 @@ object Preliminary {
             annualKm / input.fuelKmPerL * prices.gasolinePerLiter
         } else null
         if (input.fuelKmPerL == null) missing += "평균 연비"
-        else assumptions += "휘발유 %,.0f원/L, 내 차 평균 연비 %.1fkm/L".format(prices.gasolinePerLiter, input.fuelKmPerL)
+        else assumptions += "휘발유 %,.0f원/L, %s %.1fkm/L".format(
+            prices.gasolinePerLiter,
+            if (input.fuelIsCertified) "차가 연비를 주지 않아 공인 복합연비(실제보다 높게 나오는 편이라 절감액은 작게 계산됨)" else "차가 기록한 평균 연비",
+            input.fuelKmPerL,
+        )
         val (evLow, evHigh) = when (input.homeCharging) {
             true -> annualKwh?.times(prices.homePerKwh) to annualKwh?.times(prices.homePerKwhHigh)
             false -> annualKwh?.times(prices.fastPerKwhLow) to annualKwh?.times(prices.fastPerKwhHigh)
