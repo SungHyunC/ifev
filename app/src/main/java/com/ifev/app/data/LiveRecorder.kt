@@ -51,6 +51,8 @@ sealed interface Moment {
     data class RouteSet(val route: RouteTarget) : Moment
     data class Departed(val atMs: Long) : Moment
     data class Parked(val trip: Trip) : Moment
+    /** The fuel level jumped up while parked: a fill-up. */
+    data class Refueled(val atMs: Long, val previousRefuelAt: Long?) : Moment
 }
 
 /** What the car reports when it already is an EV (the emulator's car is one). */
@@ -120,6 +122,9 @@ class LiveRecorder(context: Context) {
     val moments: SharedFlow<Moment> = _moments.asSharedFlow()
     private var lastAnnouncedRoute: String? = null
     private var pendingArrival: Double? = null
+    private var lastFuelPercent: Int? = null
+    /** The car's own battery energy when this trip began (EVs only). */
+    private var tripEvStartKwh: Double? = null
     private val _settings = MutableStateFlow(store.settings())
     val settings: StateFlow<Settings> = _settings.asStateFlow()
 
@@ -198,7 +203,17 @@ class LiveRecorder(context: Context) {
                         recorder.onOdometer(e.km)
                         _car.update { it.copy(odometerKm = e.km) }
                     }
-                    is CarSignal.FuelPercent -> _car.update { it.copy(fuelPercent = e.percent) }
+                    is CarSignal.FuelPercent -> {
+                        val before = lastFuelPercent
+                        lastFuelPercent = e.percent
+                        if (before != null && e.percent - before >= com.ifev.app.engine.Moments.REFUEL_JUMP_PCT && _car.value.parked != false) {
+                            val previous = _settings.value.lastRefuelAt
+                            updateSettings(_settings.value.copy(lastRefuelAt = now))
+                            log("주유 감지: $before% → ${e.percent}%")
+                            _moments.tryEmit(Moment.Refueled(now, previous))
+                        }
+                        _car.update { it.copy(fuelPercent = e.percent) }
+                    }
                     is CarSignal.TripFuelEconomy -> recorder.onTripFuelEconomy(e.kmPerL)
                     is CarSignal.AverageFuelEconomy -> _car.update { it.copy(averageFuelKmPerL = e.kmPerL) }
                     is CarSignal.Climate -> {
@@ -291,12 +306,24 @@ class LiveRecorder(context: Context) {
 
     private fun onGear(parked: Boolean, now: Long) {
         val wasDriving = recorder.driving
-        recorder.onGear(parked, now)?.let { trip ->
+        recorder.onGear(parked, now)?.let { raw ->
+            // An EV reports what the trip really took from its battery: the prediction gets graded.
+            val used = tripEvStartKwh?.let { start -> evKwhNow()?.let { start - it } }?.takeIf { it >= 0 }
+            val trip = if (used != null) raw.copy(evKwhUsed = used) else raw
+            tripEvStartKwh = null
             saveTrip(trip)
             _moments.tryEmit(Moment.Parked(trip))
         }
-        if (!wasDriving && recorder.driving) _moments.tryEmit(Moment.Departed(now))
+        if (!wasDriving && recorder.driving) {
+            tripEvStartKwh = evKwhNow()
+            _moments.tryEmit(Moment.Departed(now))
+        }
         _car.update { it.copy(parked = parked) }
+    }
+
+    private fun evKwhNow(): Double? {
+        val ev = _car.value.ev ?: return null
+        return ev.levelKwh ?: ev.soc?.let { soc -> ev.capacityKwh?.let { soc / 100 * it } }
     }
 
     private fun saveTrip(trip: Trip) {

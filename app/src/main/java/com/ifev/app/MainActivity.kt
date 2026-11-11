@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
             onDemoFourWeeks = viewModel::demoFourWeeks,
             onVoice = viewModel::toggleVoice,
             onReal = viewModel::demoReal,
+            onDemoRefuel = viewModel::demoRefuel,
         )
         setContent {
             IfEvTheme {
@@ -57,6 +58,7 @@ class MainActivity : ComponentActivity() {
             "day0" -> viewModel.demoDayZero()
             "drive" -> viewModel.demoDrive()
             "weeks" -> viewModel.demoFourWeeks()
+            "refuel" -> viewModel.demoRefuel()
         }
     }
 

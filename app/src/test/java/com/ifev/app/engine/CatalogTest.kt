@@ -9,12 +9,14 @@ import org.junit.Test
 class CatalogTest {
 
     @Test
-    fun derivedColdKeepsTheCertifiedCombinedAndTheWarmSplit() {
+    fun derivedColdKeepsTheCertifiedCombinedAndCostsTheCityMore() {
         val warm = CertifiedRange(454.0, 371.0, 417.0)
         val cold = EvCatalog.coldFromCombined(warm, 307.0)
         assertEquals(307.0, cold.combined, 1e-9)
-        assertEquals(warm.city / warm.highway, cold.city / cold.highway, 1e-9)
-        assertTrue(cold.city < warm.city && cold.highway < warm.highway)
+        // 55/45 energy-weighted combined of the derived city and highway gives the certified figure back.
+        assertEquals(307.0, 1 / (0.55 / cold.city + 0.45 / cold.highway), 0.5)
+        assertTrue(cold.city / warm.city < cold.highway / warm.highway)
+        assertTrue(cold.city < warm.city && cold.highway <= warm.highway)
     }
 
     @Test

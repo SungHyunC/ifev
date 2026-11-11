@@ -13,8 +13,8 @@ object Lines {
         val head = "${destination}까지 ${km(p.distanceKm)}. ${model.ifItWere} 도착할 때 배터리 ${pct(p.arrivalSoc)}예요."
         val stops = when {
             p.stops > 0 -> " 가는 길에 급속 충전 ${p.stops}번, 약 ${p.chargeMinutes.roundToInt()}분이 필요해요."
-            p.stopsWinter > 0 -> " 충전 없이 갈 수 있어요. 1월이라면 급속 충전 ${p.stopsWinter}번이 필요해요."
-            else -> " 충전 없이 다녀올 수 있는 거리예요."
+            p.stopsWinter > 0 -> " 충전 없이 갈 수 있어요. 1월이라면 가는 길에 급속 충전 ${p.stopsWinter}번이 필요해요."
+            else -> " 가는 길에 충전은 필요 없어요."
         }
         return head + stops
     }
@@ -25,6 +25,23 @@ object Lines {
 
     fun departedAfterCharging(model: EvModel, soc: Double): String =
         "${model.ifItWere} 세워 둔 사이 집에서 ${pct(soc)}까지 충전하고 출발해요."
+
+    fun refueled(model: EvModel, c: RefuelCompare, homeCharging: Boolean): String =
+        "방금 주유하셨네요. 지난 주유 뒤로 달린 ${km(c.km)}에 기름값이 약 ${won(c.fuelWon)} 들었어요. " +
+            "${model.ifItWere} ${if (homeCharging) "집 충전으로" else "급속 충전으로"} 약 ${won(c.evWon)}이에요."
+
+    /** "4만 6천 원", rounded to the thousand, the way it is said. */
+    fun won(v: Double): String {
+        val thousands = Math.round(v / 1000).toInt()
+        if (thousands <= 0) return "${Math.round(v)}원"
+        val man = thousands / 10
+        val chun = thousands % 10
+        return when {
+            man == 0 -> "${chun}천 원"
+            chun == 0 -> "${man}만 원"
+            else -> "${man}만 ${chun}천 원"
+        }
+    }
 
     private fun km(v: Double) = if (v < 10) "%.1f킬로미터".format(v) else "${v.roundToInt()}킬로미터"
 

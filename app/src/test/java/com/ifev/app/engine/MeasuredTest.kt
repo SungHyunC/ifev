@@ -65,7 +65,7 @@ class MeasuredTest {
         val rows = Measured.compare(Measured.predictedMonthly(prelim), report.monthly)
         assertEquals(6, rows.size)
         // The day-one estimate makes no claim about single low days or long-trip charging.
-        assertTrue(rows.all { it.predicted != "-" || it.label == "배터리 20% 미만인 날" || it.label == "장거리 가는 길 급속" })
+        assertTrue(rows.all { it.predicted != "-" || it.label == "배터리 20% 미만인 날" || it.label == "장거리 날 급속" })
     }
 
     @Test

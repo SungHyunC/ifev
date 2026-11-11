@@ -19,6 +19,8 @@ data class Settings(
     val myCarId: String? = null,
     /** One spoken line when a destination is set and when parking. */
     val voiceOn: Boolean = true,
+    /** When the last fill-up was seen (fuel level jumping up), for "since the last refuel". */
+    val lastRefuelAt: Long? = null,
 )
 
 /**
@@ -38,6 +40,7 @@ class Store(context: Context) {
         monthsFromVin = prefs.getBoolean(KEY_MONTHS_VIN, false),
         myCarId = prefs.getString(KEY_MY_CAR, null),
         voiceOn = prefs.getBoolean(KEY_VOICE, true),
+        lastRefuelAt = prefs.getLong(KEY_REFUEL, -1).takeIf { it > 0 },
     )
 
     fun save(s: Settings) {
@@ -48,6 +51,7 @@ class Store(context: Context) {
             .putBoolean(KEY_MONTHS_VIN, s.monthsFromVin)
             .putString(KEY_MY_CAR, s.myCarId)
             .putBoolean(KEY_VOICE, s.voiceOn)
+            .putLong(KEY_REFUEL, s.lastRefuelAt ?: -1)
             .apply()
     }
 
@@ -124,6 +128,7 @@ class Store(context: Context) {
         .put("t", tempC).put("c", climateShare)
         .put("f", fuelKmPerL ?: JSONObject.NULL)
         .put("ds", distanceSource.name)
+        .put("ev", evKwhUsed ?: JSONObject.NULL)
 
     private fun JSONObject.toTrip() = Trip(
         startAt = getLong("s"),
@@ -135,6 +140,7 @@ class Store(context: Context) {
         climateShare = getDouble("c"),
         fuelKmPerL = if (isNull("f")) null else getDouble("f"),
         distanceSource = optString("ds").let { s -> DistanceSource.entries.firstOrNull { it.name == s } ?: DistanceSource.UNKNOWN },
+        evKwhUsed = if (has("ev") && !isNull("ev")) getDouble("ev") else null,
     )
 
     private companion object {
@@ -144,5 +150,6 @@ class Store(context: Context) {
         const val KEY_MONTHS_VIN = "monthsFromVin"
         const val KEY_MY_CAR = "myCar"
         const val KEY_VOICE = "voice"
+        const val KEY_REFUEL = "lastRefuelAt"
     }
 }

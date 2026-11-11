@@ -21,6 +21,10 @@ data class ChargingPlan(
     /** Effective average power on a 100–200 kW public charger. */
     val fastKw: Double = 120.0,
     val fastOverheadMin: Double = 5.0,
+    /** With a home charger, a trip at least this long next means plugging in the night before (to 90 %). */
+    val topUpBeforeKm: Double = 100.0,
+    /** Parked at least this long away from a home charger, the driver charges if the next leg needs it. */
+    val minStopHoursToCharge: Double = 0.5,
 )
 
 data class DaySummary(
@@ -41,6 +45,8 @@ data class SimResult(
     val fastCharges: Int,
     val enRouteFastCharges: Int,
     val fastMinutes: Double,
+    /** Of [fastMinutes], minutes the car was parked there anyway (a stop it made regardless). */
+    val fastMinutesWhileParked: Double = 0.0,
     val homeKwh: Double,
     val fastKwh: Double,
     val evCostWon: Double,
@@ -101,17 +107,20 @@ object BatterySim {
         var fastCharges = 0
         var enRoute = 0
         var fastMinutes = 0.0
+        var parkedOverlap = 0.0
         var fuelCost = 0.0
         var fuelUnknownKm = 0.0
         val days = LinkedHashMap<LocalDate, DayAcc>()
 
+        /** Returns the minutes the charge takes. */
         fun fastCharge(to: Double): Double {
             val added = (to - soc).coerceAtLeast(0.0)
+            val minutes = added * battery / plan.fastKw * 60 + plan.fastOverheadMin
             fastKwh += added * battery
-            fastMinutes += added * battery / plan.fastKw * 60 + plan.fastOverheadMin
+            fastMinutes += minutes
             fastCharges++
             soc = to
-            return added
+            return minutes
         }
 
         sorted.forEachIndexed { i, trip ->
@@ -140,15 +149,26 @@ object BatterySim {
 
             val parkedUntil = sorted.getOrNull(i + 1)?.startAt ?: nowMs ?: trip.endAt
             val parkedHours = (parkedUntil - trip.endAt) / 3_600_000.0
-            if (plan.homeCharging) {
-                if (trip.endPlace == Place.HOME && parkedHours >= plan.minHomeParkHours && soc < plan.homeChargeBelow) {
+            val next = sorted.getOrNull(i + 1)
+            val nextNeed = next?.let { it.distanceKm * EnergyModel.kwhPerKm(model, it.tempC, it.avgSpeedKmh, it.climateShare) / battery } ?: 0.0
+            val atHomeWithCharger = plan.homeCharging && trip.endPlace == Place.HOME
+            if (!atHomeWithCharger && parkedHours >= plan.minStopHoursToCharge && soc - nextNeed < LOW_SOC && soc < plan.fastChargeTo) {
+                // Parked anyway (a meal, a night at the destination) and the next leg would run low:
+                // charge here rather than stop on the way. Counted with the long-trip charges when long.
+                parkedOverlap += min(fastCharge(plan.fastChargeTo), parkedHours * 60)
+                if (trip.distanceKm >= plan.topUpBeforeKm || (next?.distanceKm ?: 0.0) >= plan.topUpBeforeKm) enRoute++
+                day.fast++
+            } else if (plan.homeCharging) {
+                val longNext = next != null && next.distanceKm >= plan.topUpBeforeKm && soc < plan.homeChargeTo - 0.01
+                if (trip.endPlace == Place.HOME && parkedHours >= plan.minHomeParkHours && (soc < plan.homeChargeBelow || longNext)) {
                     homeKwh += (plan.homeChargeTo - soc) * battery
                     soc = plan.homeChargeTo
                     homeCharges++
                     day.home++
                 }
             } else if (soc < plan.publicChargeBelow) {
-                fastCharge(plan.fastChargeTo)
+                // Charged where the car was parked anyway: that much of the time is not extra waiting.
+                parkedOverlap += min(fastCharge(plan.fastChargeTo), parkedHours * 60)
                 day.fast++
             }
             day.endSoc = soc
@@ -169,6 +189,7 @@ object BatterySim {
             fastCharges = fastCharges,
             enRouteFastCharges = enRoute,
             fastMinutes = fastMinutes,
+            fastMinutesWhileParked = parkedOverlap,
             homeKwh = homeKwh,
             fastKwh = fastKwh,
             evCostWon = cost(prices.homePerKwh, prices.fastPerKwh),

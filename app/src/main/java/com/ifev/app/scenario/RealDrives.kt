@@ -34,6 +34,7 @@ object RealDrives {
                             tempC = o.getDouble("t"), climateShare = o.getDouble("c"),
                             fuelKmPerL = if (o.isNull("f")) null else o.getDouble("f"),
                             distanceSource = DistanceSource.entries.firstOrNull { it.name == o.optString("ds") } ?: DistanceSource.TRACK,
+                            evKwhUsed = if (o.has("ev") && !o.isNull("ev")) o.getDouble("ev") else null,
                         )
                     }.sortedBy { it.startAt },
                 )

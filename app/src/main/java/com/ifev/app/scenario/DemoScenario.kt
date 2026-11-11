@@ -103,6 +103,9 @@ object DemoScenario {
         return trips
     }
 
+    /** In the demo, the last fill-up was this long before the end of the four weeks. */
+    const val REFUEL_EVERY_MS = 9 * 24 * 3_600_000L
+
     /** "Now" at the end of the four weeks. */
     val fourWeeksNow: Long = LocalDateTime.of(firstDay.plusDays(27), java.time.LocalTime.of(21, 30))
         .atZone(Trip.KST).toInstant().toEpochMilli()

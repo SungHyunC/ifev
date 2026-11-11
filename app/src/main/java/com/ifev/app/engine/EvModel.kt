@@ -99,11 +99,24 @@ object EvCatalog {
 
     fun byId(id: String?): EvModel = all.firstOrNull { it.id == id } ?: IONIQ6_LONG
 
-    /** Splits a cold combined range into city and highway with the warm split. */
+    /**
+     * Splits a cold combined range into city and highway. Cold costs the city cycle much more than the
+     * highway (the heater runs for longer per km): the certified Ioniq 6 Long Range keeps 70 % of its
+     * warm city range but 93 % of its highway range. The same shape is used here, scaled so that the
+     * combined figure (55 % city, 45 % highway, on energy) matches the published cold combined range.
+     */
     fun coldFromCombined(warm: CertifiedRange, coldCombined: Double): CertifiedRange {
         val r = coldCombined / warm.combined
-        return CertifiedRange(city = warm.city * r, highway = warm.highway * r, combined = coldCombined)
+        val city0 = warm.city * r * CITY_SHAPE
+        val highway0 = minOf(warm.highway, warm.highway * r * HIGHWAY_SHAPE)
+        val combined0 = 1 / (0.55 / city0 + 0.45 / highway0)
+        val k = coldCombined / combined0
+        return CertifiedRange(city = city0 * k, highway = minOf(warm.highway, highway0 * k), combined = coldCombined)
     }
+
+    /** Ioniq 6 Long Range: cold/warm by cycle relative to cold/warm combined (429/609, 482/517 over 453/568). */
+    private const val CITY_SHAPE = (429.0 / 609.0) / (453.0 / 568.0)
+    private const val HIGHWAY_SHAPE = (482.0 / 517.0) / (453.0 / 568.0)
 }
 
 /** 아이오닉 6 롱레인지(84kWh) 인증 저온 453 ÷ 상온 568. */

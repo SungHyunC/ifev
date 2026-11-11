@@ -89,7 +89,7 @@ class ReviewFixesTest {
         assertEquals(r.monthly.fastCharges, r.monthly.fastRoutine + r.monthly.fastEnRoute, 1e-9)
         val rows = Measured.compare(null, r.monthly)
         assertTrue(rows.any { it.label == "평소 급속 충전" })
-        assertTrue(rows.any { it.label == "장거리 가는 길 급속" })
+        assertTrue(rows.any { it.label == "장거리 날 급속" })
         val expected = if (r.monthly.fastRoutine <= Preliminary.MAX_FAST_PER_MONTH_FOR_EV) Verdict.CONDITIONAL else Verdict.HYBRID_BETTER
         assertEquals(expected, r.verdict)
     }

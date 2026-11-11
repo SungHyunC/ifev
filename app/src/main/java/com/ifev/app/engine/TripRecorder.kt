@@ -131,12 +131,21 @@ class TripRecorder(
         return if (start != null && odo != null && odo > start) odo - start else null
     }
 
-    private fun currentKmOf(o: Open): Double = maxOf(odometerKm(o) ?: 0.0, o.speedKm, o.pathKm)
+    /**
+     * When the odometer moves it is the reference: vehicle speed may add up to one coarse odometer step
+     * on top of it, and the GPS track (which zigzags with position noise) is not used. Without a moving
+     * odometer, the longer of speed and track.
+     */
+    private fun currentKmOf(o: Open): Double {
+        val odo = odometerKm(o) ?: 0.0
+        return if (odo > 0) maxOf(odo, minOf(o.speedKm, odo + ODOMETER_STEP_KM)) else maxOf(o.speedKm, o.pathKm)
+    }
 
     private fun sourceOf(o: Open): DistanceSource {
         val odo = odometerKm(o) ?: 0.0
         return when {
-            odo > 0 && odo >= o.speedKm && odo >= o.pathKm -> DistanceSource.ODOMETER
+            odo > 0 && odo >= o.speedKm -> DistanceSource.ODOMETER
+            odo > 0 -> DistanceSource.SPEED
             o.speedKm >= o.pathKm -> DistanceSource.SPEED
             else -> DistanceSource.TRACK
         }
@@ -166,6 +175,7 @@ class TripRecorder(
         if (open != null) return
         open = Open(s.startAt, s.startOdometer, s.startPlace, s.pathKm, s.speedKm, s.climateMs, climateSince = now)
         parked = false
+        climateOn = s.climateOn
     }
 
     private fun here(): Place = position?.let { (lat, lon) -> placeOf(lat, lon) } ?: Place.OTHER
@@ -173,6 +183,8 @@ class TripRecorder(
     companion object {
         /** Shuffling between P and D while parking is not a trip. */
         const val MIN_TRIP_KM = 0.3
+        /** Odometers report in whole kilometres (or coarser) on many cars. */
+        private const val ODOMETER_STEP_KM = 1.0
         private const val MAX_STEP_KM = 5.0
         /** A longer silence between speed samples is a gap in data, not constant speed. */
         private const val MAX_SPEED_GAP_MS = 10_000L

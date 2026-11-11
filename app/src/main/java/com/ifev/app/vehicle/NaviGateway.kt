@@ -94,11 +94,12 @@ class NaviGateway(context: Context, private val log: (String) -> Unit) {
             override fun onRouteStateInfo(routeStateInfo: RouteStateInfo) {
                 log("내비 경로 상태: routing=${routeStateInfo.isRouting} 도착잔량=${routeStateInfo.remainDestinationChargingInt}")
                 // isRouting is false during guidance on the emulator, so it does not end the route here;
-                // onRouteEnded / onRouteCancelled / onDestinationArrived do.
+                // onRouteCancelled / onDestinationArrived do. (onRouteEnded is the deprecated name of
+                // onRoutingCompleted: the route search finished, not the guidance.)
                 if (routeStateInfo.remainDestinationChargingInt > 0) trySend(NaviSignal.ArrivalEstimate(routeStateInfo.remainDestinationChargingInt))
             }
 
-            override fun onRouteEnded() { trySend(NaviSignal.RouteCleared) }
+
             override fun onRouteCancelled() { trySend(NaviSignal.RouteCleared) }
             override fun onDestinationArrived(destinationArrivedInfo: DestinationArrivedInfo) { trySend(NaviSignal.RouteCleared) }
 

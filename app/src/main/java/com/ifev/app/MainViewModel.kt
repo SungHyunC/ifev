@@ -30,6 +30,7 @@ import com.ifev.app.data.RouteTarget
 import com.ifev.app.engine.DistanceSource
 import com.ifev.app.engine.Lines
 import com.ifev.app.engine.Prices
+import com.ifev.app.engine.Moments
 import com.ifev.app.engine.NaviCheck
 import com.ifev.app.engine.NaviComparison
 import com.ifev.app.engine.RoutePlanner
@@ -97,6 +98,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         /** Set while showing a real person's recorded weeks. */
         val realLabel: String?,
         val realDriveLabels: List<String>,
+        /** The same recorded weeks at the January normal temperature. */
+        val winter: MeasuredReport?,
+        /** For a car that already is an EV: IfEV's prediction graded by the car's own battery. */
+        val score: Moments.PredictionScore?,
+        /** The line the car spoke last, while it is fresh. */
+        val lastLine: String?,
     )
 
     data class CarFact(val label: String, val value: String?, val api: String)
@@ -126,6 +133,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    @Volatile private var lastLine: Pair<String, Long>? = null
+
+    init {
+        viewModelScope.launch { narrator.lastLine.collect { lastLine = it } }
+    }
+
     val ui: StateFlow<UiState?> = combine(local, recorder.car, recorder.trips, recorder.settings, ticker) { l, car, trips, settings, now ->
         if (l.mode == Mode.DEMO) build(l, l.demoCar, l.demoTrips, l.demoSettings, l.demoNow ?: now)
         else build(l, car, trips, settings, now)
@@ -136,6 +149,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setMode(mode: Mode) {
         if (liveDriving) return
+        narrator.clearLastLine()
         driveJob?.cancel()
         local.update { Local(mode = mode, demoSettings = it.demoSettings) }
     }
@@ -168,6 +182,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Demo stage ①: the day the app is installed. Nothing recorded yet, only what the car already knows. */
     fun demoDayZero() {
         if (liveDriving) return
+        narrator.clearLastLine()
         driveJob?.cancel()
         local.update { it.copy(mode = Mode.DEMO, stage = Stage.DAY_ZERO, tab = Tab.PRELIM, demoCar = DemoScenario.dayZero(), demoTrips = emptyList(), demoNow = null) }
     }
@@ -178,6 +193,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun demoDrive() {
         if (liveDriving) return
+        narrator.clearLastLine()
         driveJob?.cancel()
         local.update { it.copy(mode = Mode.DEMO, stage = Stage.DRIVING, tab = Tab.MEASURED, demoTrips = emptyList(), demoNow = null) }
         driveJob = viewModelScope.launch {
@@ -229,6 +245,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** A real person's recorded weeks (phone GPS, no coordinates) on the same screens. */
     fun demoReal(index: Int) {
         if (liveDriving) return
+        narrator.clearLastLine()
         val d = realDrives.getOrNull(index) ?: return
         driveJob?.cancel()
         local.update {
@@ -242,9 +259,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Demo: the fill-up moment, at the end of the four made-up weeks. The last fill-up was nine days
+     * before; the trips since then are priced in petrol and in the imagined EV's electricity.
+     */
+    fun demoRefuel() {
+        if (liveDriving) return
+        demoFourWeeks()
+        val settings = local.value.demoSettings
+        val model = EvCatalog.byId(settings.modelId)
+        val plan = ChargingPlan(homeCharging = settings.homeCharging ?: true)
+        val since = DemoScenario.fourWeeks().filter { it.startAt >= DemoScenario.fourWeeksNow - DemoScenario.REFUEL_EVERY_MS }
+        Moments.sinceRefuel(model, since, plan, DemoScenario.dayZero().averageFuelKmPerL)?.let { demoSay(Lines.refueled(model, it, plan.homeCharging)) }
+    }
+
     /** Demo stage ③: four recorded weeks, compared with the day-one estimate. */
     fun demoFourWeeks() {
         if (liveDriving) return
+        narrator.clearLastLine()
         driveJob?.cancel()
         local.update {
             it.copy(
@@ -334,6 +366,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             voiceEngine = narrator.engine,
             realLabel = l.realLabel.takeIf { l.stage == Stage.REAL },
             realDriveLabels = realDrives.map { it.label },
+            winter = if (report != null && report.days >= Measured.MIN_COMPARE_DAYS) {
+                Measured.report(model, Moments.winterOf(trips), plan, fallbackFuelKmPerL = fuel, nowMs = now, homeChargingAnswered = answered)
+            } else null,
+            score = Moments.predictionScore(model, trips),
+            lastLine = lastLine?.takeIf { (_, at) -> System.currentTimeMillis() - at < LAST_LINE_MS }?.first,
         )
     }
 
@@ -364,5 +401,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val TICK_MS = 1_000L
+        const val LAST_LINE_MS = 3 * 60_000L
     }
 }
