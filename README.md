@@ -101,5 +101,9 @@ app/src/main/java/com/ifev/app/
 └── MainActivity.kt, MainViewModel.kt
 ```
 
+## 시연 자료
+- `demo/IfEV_demo.mp4`: 화면 캡처 7장을 이어 붙인 약 58초 슬라이드 영상 (① 설치 직후 → 주행 중 → Virtual Console 실시간 주행·기록 → ③ 4주 뒤 리포트 → 예비 vs 실제 → 집 충전 없음 판정). 에뮬레이터 화면 녹화(`screenrecord`, `adb emu screenrecord`)가 Pleos 에뮬레이터 v2.1에서 빈 파일을 남겨 캡처로 대신했습니다.
+- `demo/*.png`: 각 단계 화면 캡처
+
 ## APK
 - `apk/IfEV_release.apk` (release 빌드, 시연용으로 debug 키 서명). 제출 시 `팀명_이프EV_release.apk`로 이름을 바꿉니다.
