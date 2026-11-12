@@ -1,25 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 이프EV 아이콘: 연료 방울(주황)이 배터리(청록)로 이어지는 모양 -->
+<!-- 이프EV 아이콘: 진회색 둥근 사각형 위의 "if". i의 점 하나만 전기차 청록. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
     android:height="48dp"
     android:viewportWidth="48"
     android:viewportHeight="48">
     <path
-        android:fillColor="#FF141A22"
-        android:pathData="M24,2a22,22 0,1 1,0 44a22,22 0,1 1,0 -44z" />
+        android:fillColor="#FF1E2228"
+        android:pathData="M11,0 L37,0 A11,11 0,0 1,48 11 L48,37 A11,11 0,0 1,37 48 L11,48 A11,11 0,0 1,0 37 L0,11 A11,11 0,0 1,11 0z" />
     <path
-        android:fillColor="#FFFF9F1C"
-        android:pathData="M14,13 C14,13 8,20.5 8,24.5 a6,6 0,0 0,12 0 C20,20.5 14,13 14,13z" />
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M23,17 L37,17 Q39,17 39,19 L39,31 Q39,33 37,33 L23,33 Q21,33 21,31 L21,19 Q21,17 23,17z"
-        android:strokeWidth="2.5"
-        android:strokeColor="#FF00D1C1" />
+        android:pathData="M15.7,21 L15.7,35"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round" />
     <path
         android:fillColor="#FF00D1C1"
-        android:pathData="M40.5,22 L42,22 L42,28 L40.5,28z" />
+        android:pathData="M15.7,11.9 A2.6,2.6 0,1 1,15.7 17.1 A2.6,2.6 0,1 1,15.7 11.9z" />
     <path
-        android:fillColor="#FF00D1C1"
-        android:pathData="M24,20 L32,20 L32,30 L24,30z" />
+        android:pathData="M26.2,35 L26.2,18.5 A5,5 0,0 1,31.2 13.5 L32.4,13.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M22.2,22 L30.4,22"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round" />
 </vector>
