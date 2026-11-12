@@ -1,0 +1,172 @@
+package com.ifev.app.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
+import com.ifev.app.MainViewModel.Mode
+import com.ifev.app.MainViewModel.UiState
+import com.ifev.app.data.GearState
+import com.ifev.app.engine.EnergyModel
+import com.ifev.app.engine.SeoulClimate
+import com.ifev.app.engine.ifItWere
+import com.ifev.app.ui.topview.CarTopView
+import com.ifev.app.ui.topview.SteeringConfig
+import com.ifev.app.ui.topview.TopViewInput
+import java.time.LocalDate
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+/**
+ * Main screen: the imagined EV seen from above, moving with this car's signals, and the same story in
+ * numbers beside it. While the car is out of P there is nothing to press and the view redraws at most
+ * once a second (CarUxRestrictions NO_VIDEO); parked, it animates and the report is one tap away.
+ */
+@Composable
+fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, actions: Actions, canReplay: Boolean = false, replaying: Boolean = false) {
+    val c = LocalPleosColors.current
+    val driving = ui.car.driving
+    if (ui.mode == Mode.DEMO && !driving) {
+        DemoBar(ui, actions)
+        Spacer(Modifier.height(16.dp))
+    }
+    ui.lastLine?.let { SpokenLine(it); Spacer(Modifier.height(16.dp)) }
+    val v = visual.state
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+        // ── the virtual EV ──
+        Box(
+            Modifier.weight(1.45f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(c.surface),
+        ) {
+            CarTopView(
+                input = TopViewInput(
+                    speedMs = v.speedMs,
+                    speedAtMs = v.speedAtMs,
+                    gear = v.gear,
+                    steeringDeg = v.steeringDeg,
+                    brake = v.brake == true,
+                    turn = v.turn,
+                    climateOn = v.climateOn == true,
+                    socFraction = ui.ghostSoc,
+                    regenLevel = visual.regenLevel,
+                    consumedFraction = (ui.startSoc - ui.ghostSoc).coerceAtLeast(0.0),
+                    restricted = v.restricted,
+                ),
+                modifier = Modifier.fillMaxSize(),
+                steering = if (ui.mode == Mode.DEMO) SteeringConfig() else LIVE_STEERING,
+            )
+            Column(Modifier.padding(28.dp)) {
+                Text("${ui.model.ifItWere}", style = PleosType.bodyStrong, color = c.textPrimary)
+                Spacer(Modifier.height(6.dp))
+                Badge(
+                    when {
+                        ui.mode == Mode.DEMO && driving -> "시연 · 가상 주행"
+                        replaying -> "방금 주행 다시 보기 · 2배속"
+                        v.restricted -> "주행 중 · 1초에 한 번 갱신"
+                        v.gear == GearState.PARK -> "정차 중"
+                        else -> gearLabel(v.gear)
+                    },
+                    c.textSecondary, c.surfaceHigh,
+                )
+            }
+        }
+        // ── the same in numbers ──
+        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Card(Modifier.fillMaxWidth()) {
+                Label("가상 배터리")
+                Text("${(ui.ghostSoc * 100).roundToInt()}%", style = PleosType.headline, color = if (ui.ghostSoc < 0.3) c.fuel else c.ev)
+                LevelBar(ui.ghostSoc, if (ui.ghostSoc < 0.3) c.fuel else c.ev)
+                Spacer(Modifier.height(8.dp))
+                Label(if (ui.chargedWhileParked) "세워 둔 사이 충전하고 ${(ui.startSoc * 100).roundToInt()}%에서 출발" else "출발할 때 ${(ui.startSoc * 100).roundToInt()}%")
+            }
+            NumberRow("이번 주행", if (ui.car.tripKm > 0) "%.1f km · %.1f kWh".format(ui.car.tripKm, ui.tripKwh) else "-",
+                if (ui.car.tripKm > 0) "${ui.settings.plan().everydayCharger} 약 %,d원".format((ui.tripKwh * ui.settings.plan().everydayPerKwh()).roundToInt()) else "출발하면 셉니다")
+            NumberRow(
+                "감속 때 되찾은 전기",
+                if (ui.tripRegenKwh >= 0.01) "%.2f kWh".format(ui.tripRegenKwh) else "-",
+                if (visual.regenLevel > 0.05) "지금 회생 중" else "브레이크 대신 모터가 되찾는 몫 · 추정",
+                highlight = visual.regenLevel > 0.05,
+            )
+            NumberRow("공조", climateLine(v), climateCaption(ui))
+            if (driving || replaying || (v.speedMs ?: 0.0) > 0.3) {
+                NumberRow("속도", v.speedMs?.let { "%d km/h".format(abs(it * 3.6).roundToInt()) } ?: "-", gearLabel(v.gear))
+            }
+            ui.route?.let { r ->
+                NumberRow((ui.car.route?.name ?: "목적지") + " 도착", "${(r.arrivalSoc * 100).roundToInt()}%",
+                    "%,d km · ".format(r.distanceKm.roundToInt()) + if (r.stops > 0) "급속 ${r.stops}번" else "충전 없이")
+            }
+            Spacer(Modifier.weight(1f))
+            if (!driving) {
+                val verdict = ui.report?.verdict ?: ui.prelim.verdict
+                Card(Modifier.fillMaxWidth()) {
+                    Label(if (ui.report != null) "기록한 ${ui.report.days}일 판정" else "설치 직후 예비 판정")
+                    Text(verdict.titleFor(ui.settings.plan()), style = PleosType.bodyStrong, color = c.textPrimary)
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (canReplay && ui.mode != Mode.DEMO) PleosButton(if (replaying) "다시 보는 중" else "방금 주행 다시 보기", false, actions.onReplay, Modifier.weight(1f))
+                        PleosButton("리포트 보기", true, actions.onOpenReport, Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NumberRow(title: String, value: String, caption: String?, highlight: Boolean = false) {
+    val c = LocalPleosColors.current
+    Card(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Label(title, modifier = Modifier.width(220.dp))
+            Column(Modifier.weight(1f)) {
+                Text(value, style = PleosType.title, color = if (highlight) c.ev else c.textPrimary)
+                if (caption != null) Label(caption, style = PleosType.labelSmall)
+            }
+        }
+    }
+}
+
+private fun gearLabel(g: GearState) = when (g) {
+    GearState.PARK -> "P"
+    GearState.REVERSE -> "R"
+    GearState.NEUTRAL -> "N"
+    GearState.DRIVE -> "D"
+    GearState.UNKNOWN -> "기어 신호 대기"
+}
+
+/** "켜짐 · 5.6 km/kWh (끄면 6.4)": the climate's cost at this month's normal temperature. */
+private fun climateLine(v: com.ifev.app.data.VehicleVisualState): String {
+    val on = v.climateOn ?: return "-"
+    return if (on) "켜짐" else "꺼짐"
+}
+
+private fun climateCaption(ui: UiState): String? {
+    val month = LocalDate.now().monthValue
+    val temp = SeoulClimate.meanC(month)
+    val speed = ui.car.tripKm.takeIf { it > 0 }?.let { 30.0 } ?: 30.0
+    val onKm = 1 / EnergyModel.kwhPerKm(ui.model, temp, speed, 1.0)
+    val offKm = 1 / EnergyModel.kwhPerKm(ui.model, temp, speed, 0.0)
+    return "전비 %.1f km/kWh · 끄면 %.1f (서울 %d월 평년 %.0f℃)".format(onKm, offKm, month, temp)
+}
+
+/**
+ * How this car's steering value is read. The Pleos SDK documents a front road-wheel angle, left
+ * negative; on the emulator (2026-11-12) the Virtual Console's steering −150° arrived through the SDK as
+ * +150: a hand-wheel range with the sign reversed. So: hand wheel, 15:1, mirrored (−150 → −10° left).
+ * To be confirmed on a real car; this is the one place to change.
+ */
+private val LIVE_STEERING = SteeringConfig(kind = SteeringConfig.Kind.HAND_WHEEL, sign = -1, ratio = 15.0)

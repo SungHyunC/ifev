@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.ifev.app.MainViewModel
 import com.ifev.app.MainViewModel.Mode
 import com.ifev.app.MainViewModel.Stage
 import com.ifev.app.MainViewModel.Tab
@@ -67,28 +68,47 @@ class Actions(
     val onReal: (Int) -> Unit,
     val onDemoRefuel: () -> Unit,
     val onWorkCharging: (Boolean) -> Unit = {},
+    val onOpenReport: () -> Unit = {},
+    val onCloseReport: () -> Unit = {},
+    val onReplay: () -> Unit = {},
 )
 
 @Composable
-fun MainScreen(ui: UiState, actions: Actions) {
+fun MainScreen(ui: UiState, visual: MainViewModel.VisualNow, actions: Actions, canReplay: Boolean = false, replaying: Boolean = false) {
     val c = LocalPleosColors.current
     Column(Modifier.fillMaxSize().background(c.background).padding(horizontal = 40.dp, vertical = 24.dp)) {
         TopBar(ui, actions)
-        // While the car is out of P there is nothing to switch or press.
-        if (ui.mode == Mode.DEMO && !ui.car.driving) {
-            Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(16.dp))
+        // Driving always shows the virtual EV, with nothing to press; the report pages are parked-only.
+        if (ui.screen == MainViewModel.Screen.REPORT && !ui.car.driving) {
+            ReportPages(ui, actions)
+        } else {
+            HomeScreen(ui, visual, actions, canReplay, replaying)
+        }
+    }
+}
+
+/** The report pages: what the recorded weeks add up to, opened from the virtual EV while parked. */
+@Composable
+private fun ReportPages(ui: UiState, actions: Actions) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        PleosButton("← 차로 돌아가기", false, actions.onCloseReport)
+        if (ui.mode == Mode.DEMO) {
+            Spacer(Modifier.width(16.dp))
             DemoBar(ui, actions)
         }
-        Spacer(Modifier.height(20.dp))
-        ui.lastLine?.let { line ->
-            // The spoken line, also in writing: the moment matters more than the sound.
-            Card(Modifier.fillMaxWidth()) {
-                Label("차가 방금 말한 것", style = PleosType.labelSmall)
-                Text(line, style = PleosType.bodyStrong, color = LocalPleosColors.current.textPrimary)
-            }
-            Spacer(Modifier.height(16.dp))
-        }
-        if (ui.car.driving) DrivingView(ui) else ParkedView(ui, actions)
+    }
+    Spacer(Modifier.height(16.dp))
+    ui.lastLine?.let { line -> SpokenLine(line); Spacer(Modifier.height(16.dp)) }
+    ParkedView(ui, actions)
+}
+
+/** The spoken line, also in writing: the moment matters more than the sound. */
+@Composable
+internal fun SpokenLine(line: String) {
+    Card(Modifier.fillMaxWidth()) {
+        Label("차가 방금 말한 것", style = PleosType.labelSmall)
+        Text(line, style = PleosType.bodyStrong, color = LocalPleosColors.current.textPrimary)
     }
 }
 
@@ -121,7 +141,7 @@ private fun TopBar(ui: UiState, actions: Actions) {
 }
 
 @Composable
-private fun DemoBar(ui: UiState, actions: Actions) {
+internal fun DemoBar(ui: UiState, actions: Actions) {
     val stage = ui.stage
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -150,7 +170,7 @@ private fun DemoBar(ui: UiState, actions: Actions) {
  * there is nothing to touch. The route card appears when the navigation has a destination.
  */
 @Composable
-private fun DrivingView(ui: UiState) {
+internal fun DrivingView(ui: UiState) {
     val c = LocalPleosColors.current
     // Priced the way the driver charges: at home (slow) or, without a home charger, at a fast charger.
     val plan = ui.settings.plan()

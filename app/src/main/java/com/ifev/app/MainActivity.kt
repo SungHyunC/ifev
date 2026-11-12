@@ -39,11 +39,17 @@ class MainActivity : ComponentActivity() {
             onReal = viewModel::demoReal,
             onDemoRefuel = viewModel::demoRefuel,
             onWorkCharging = viewModel::answerWorkCharging,
+            onOpenReport = { viewModel.openReport() },
+            onCloseReport = viewModel::closeReport,
+            onReplay = viewModel::replayLastDrive,
         )
         setContent {
             IfEvTheme {
                 val ui by viewModel.ui.collectAsStateWithLifecycle()
-                ui?.let { MainScreen(it, actions) }
+                val visual by viewModel.visual.collectAsStateWithLifecycle()
+                val lastDrive by viewModel.lastDrive.collectAsStateWithLifecycle()
+                val replaying by viewModel.replaying.collectAsStateWithLifecycle()
+                ui?.let { MainScreen(it, visual, actions, canReplay = lastDrive.size >= 2, replaying = replaying) }
             }
         }
     }

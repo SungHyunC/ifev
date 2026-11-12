@@ -5,9 +5,11 @@ import android.car.VehiclePropertyIds
 import android.car.hardware.CarPropertyValue
 import android.car.hardware.property.CarPropertyManager
 import android.content.Context
+import android.os.SystemClock
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.map
 
 /**
  * Vehicle speed (m/s) from the standard AAOS property PERF_VEHICLE_SPEED, which the Pleos Vehicle SDK
@@ -18,29 +20,42 @@ import kotlinx.coroutines.flow.callbackFlow
 class SpeedSource(context: Context, private val log: (String) -> Unit) {
     private val app = context.applicationContext
 
-    fun speeds(): Flow<Double> = callbackFlow {
+    fun speeds(): Flow<Double> = samples().map { it.speedMs }
+
+    fun samples(): Flow<SpeedSample> = callbackFlow {
         val car = runCatching { Car.createCar(app) }.getOrNull()
-        val manager = car?.getCarManager(Car.PROPERTY_SERVICE) as? CarPropertyManager
+        val manager = runCatching { car?.getCarManager(Car.PROPERTY_SERVICE) as? CarPropertyManager }.getOrNull()
         val callback = object : CarPropertyManager.CarPropertyEventCallback {
             override fun onChangeEvent(value: CarPropertyValue<*>) {
-                (value.value as? Float)?.let { trySend(it.toDouble()) }
+                val receivedAt = SystemClock.elapsedRealtime()
+                // Unavailable values can still carry an old payload; never turn one into motion.
+                if (value.status != CarPropertyValue.STATUS_AVAILABLE) return
+                speedSample(value.propertyId, value.status, value.value, receivedAt)?.let { trySend(it) }
             }
 
             override fun onErrorEvent(propertyId: Int, zone: Int) {
                 log("차속 오류: $propertyId")
             }
         }
-        val ok = manager != null && runCatching {
-            manager.registerCallback(callback, VehiclePropertyIds.PERF_VEHICLE_SPEED, CarPropertyManager.SENSOR_RATE_NORMAL)
-        }.onFailure { log("차속 구독 실패: ${it.message}") }.getOrDefault(false)
+        val config = runCatching { manager?.getCarPropertyConfig(VehiclePropertyIds.PERF_VEHICLE_SPEED) }.getOrNull()
+        val rates = listOfNotNull(
+            speedSampleRate(config?.minSampleRate, config?.maxSampleRate),
+            CarPropertyManager.SENSOR_RATE_FASTEST,
+            CarPropertyManager.SENSOR_RATE_NORMAL,
+        ).distinct()
+        val ok = manager != null && rates.any { rate ->
+            runCatching { manager.registerCallback(callback, VehiclePropertyIds.PERF_VEHICLE_SPEED, rate) }
+                .onFailure { log("차속 ${rate}Hz 구독 실패: ${it.message}") }.getOrDefault(false)
+        }
         if (!ok) {
-            car?.disconnect()
+            runCatching { manager?.unregisterCallback(callback) }
+            runCatching { car?.disconnect() }
             close()
             return@callbackFlow
         }
         awaitClose {
             runCatching { manager!!.unregisterCallback(callback) }
-            car.disconnect()
+            runCatching { car?.disconnect() }
         }
     }
 }

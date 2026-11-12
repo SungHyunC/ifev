@@ -1,6 +1,7 @@
 package com.ifev.app.data
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import com.ifev.app.engine.Destination
 import com.ifev.app.engine.Place
@@ -16,6 +17,9 @@ import com.ifev.app.vehicle.ArrivalUnit
 import com.ifev.app.vehicle.NaviSignal
 import com.ifev.app.vehicle.SpeedSource
 import com.ifev.app.vehicle.VehicleGateway
+import com.ifev.app.vehicle.UxRestrictions
+import com.ifev.app.vehicle.VisualGearArbiter
+import com.ifev.app.vehicle.visualRestricted
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -101,8 +105,10 @@ class LiveRecorder(context: Context) {
     private val navi = NaviGateway(app, ::log)
     private val speed = SpeedSource(app, ::log)
     private val aaos = AaosSignals(app, ::log)
+    private val ux = UxRestrictions(app, ::log)
     /** AAOS gear first; the deprecated Pleos Gear API again once AAOS has gone quiet. */
     private val gears = GearArbiter()
+    private val visualGears = VisualGearArbiter()
     /** Set once an unspecified-unit arrival value above 100 shows this navigation sends Wh there. */
     private var arrivalInWh = false
     private var aaosJob: Job? = null
@@ -123,6 +129,14 @@ class LiveRecorder(context: Context) {
 
     private val _car = MutableStateFlow(CarState())
     val car: StateFlow<CarState> = _car.asStateFlow()
+    private val visualLock = Any()
+    private var uxRestricted: Boolean? = null
+    private val _visual = MutableStateFlow(VehicleVisualState(restricted = true))
+    /** Conflated current drawing inputs; independent of the ordered engine event channel. */
+    val visual: StateFlow<VehicleVisualState> = _visual.asStateFlow()
+    private val driveTrace = DriveTrace()
+    private val _lastDrive = MutableStateFlow<List<TracePoint>>(emptyList())
+    val lastDrive: StateFlow<List<TracePoint>> = _lastDrive.asStateFlow()
     private val _trips = MutableStateFlow(store.trips())
     val trips: StateFlow<List<Trip>> = _trips.asStateFlow()
     private val _moments = MutableSharedFlow<Moment>(extraBufferCapacity = 8)
@@ -154,6 +168,7 @@ class LiveRecorder(context: Context) {
         scope.launch { vehicle.signals().collect { events.send(it) } }
         scope.launch { navi.signals().collect { events.send(it) } }
         launchPermissionBound()
+        launchVisualSignals()
         scope.launch {
             while (isActive) {
                 navi.requestPosition()
@@ -174,10 +189,66 @@ class LiveRecorder(context: Context) {
         speedJob = scope.launch {
             // Completes when CAR_SPEED is not granted yet; try again so a later grant takes effect.
             while (isActive) {
-                speed.speeds().collect { events.send(Speed(it)) }
+                speed.samples().collect { sample ->
+                    events.send(Speed(sample.speedMs))
+                    updateVisual { it.copy(speedMs = sample.speedMs, speedAtMs = sample.receivedAtMs) }
+                }
                 delay(SPEED_RETRY_MS)
             }
         }
+    }
+
+    private fun launchVisualSignals() {
+        scope.launch {
+            vehicle.motion().collect { motion ->
+                updateVisual {
+                    it.copy(
+                        steeringDeg = motion.steeringDeg,
+                        steeringAtMs = motion.steeringAtMs,
+                        brake = motion.brake,
+                        turn = motion.turn,
+                        steeringAvailable = motion.steeringAvailable,
+                        brakeAvailable = motion.brakeAvailable,
+                        turnAvailable = motion.turnAvailable,
+                    )
+                }
+            }
+        }
+        scope.launch {
+            while (isActive) {
+                ux.restrictions().collect { restricted ->
+                    synchronized(visualLock) {
+                        uxRestricted = restricted
+                        updateVisual { it }
+                    }
+                }
+                delay(SPEED_RETRY_MS)
+            }
+        }
+        scope.launch {
+            // Change-only SDK signals need a clock as well: retain stationary sections of a drive.
+            while (isActive) {
+                delay(100)
+                updateVisual { it }
+            }
+        }
+    }
+
+    private fun updateVisual(change: (VehicleVisualState) -> VehicleVisualState) = synchronized(visualLock) {
+        val changed = change(_visual.value)
+        val next = changed.copy(restricted = visualRestricted(uxRestricted, changed.gear))
+        _visual.value = next
+        if (driveTrace.record(next, SystemClock.elapsedRealtime())) _lastDrive.value = driveTrace.lastDrive()
+    }
+
+    private fun onVisualGear(gear: GearState, fromAaos: Boolean) {
+        val at = SystemClock.elapsedRealtime()
+        if (fromAaos) {
+            visualGears.onAaos(at)
+        } else if (!visualGears.acceptPleos(gear, _visual.value.gear, at)) {
+            return
+        }
+        updateVisual { it.copy(gear = gear) }
     }
 
     /**
@@ -210,14 +281,27 @@ class LiveRecorder(context: Context) {
     }
 
     private fun handle(e: Any) {
+        // Unknown gear must clear a previously parked drawing state, but must never start/end an
+        // engine trip. Keep it out of the original event handling and persistence path entirely.
+        if (e is CarSignal.Gear && e.state == GearState.UNKNOWN) {
+            onVisualGear(e.state, fromAaos = false)
+            return
+        }
+        if (e is AaosSignals.Signal.Gear && e.state == GearState.UNKNOWN) {
+            onVisualGear(e.state, fromAaos = true)
+            return
+        }
         val now = System.currentTimeMillis()
         when (e) {
             is CarSignal -> {
                 if (_car.value.vehicleStatus != "연결됨") _car.update { it.copy(vehicleStatus = "연결됨") }
                 when (e) {
-                    is CarSignal.Gear -> if (gears.acceptPleos(e.parked, _car.value.parked, now)) {
-                        _car.update { it.copy(gearSource = "Pleos Gear") }
-                        onGear(e.parked, now)
+                    is CarSignal.Gear -> {
+                        if (gears.acceptPleos(e.parked, _car.value.parked, now)) {
+                            _car.update { it.copy(gearSource = "Pleos Gear") }
+                            onGear(e.parked, now)
+                        }
+                        onVisualGear(e.state, fromAaos = false)
                     }
                     is CarSignal.EvSoc -> {
                         if (_car.value.ev?.socPercent == null) log("EV SOC ${e.percent}%")
@@ -244,6 +328,7 @@ class LiveRecorder(context: Context) {
                     is CarSignal.Climate -> {
                         recorder.onClimate(e.on, now)
                         _car.update { it.copy(climateOn = e.on) }
+                        updateVisual { it.copy(climateOn = e.on) }
                     }
                 }
             }
@@ -302,6 +387,7 @@ class LiveRecorder(context: Context) {
                     gears.onAaos(now)
                     _car.update { it.copy(gearSource = "AAOS GEAR_SELECTION") }
                     onGear(e.parked, now)
+                    onVisualGear(e.state, fromAaos = true)
                 }
                 is AaosSignals.Signal.EvCapacityKwh -> {
                     log("배터리 용량 %.1fkWh".format(e.kwh))

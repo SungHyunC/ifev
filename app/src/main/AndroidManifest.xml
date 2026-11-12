@@ -8,6 +8,8 @@
     <!-- Vehicle SDK: 기어·누적 주행거리(CAR_DRIVE), 연료량·연비(CAR_ENERGY), 공조 사용(CAR_CLIMATE),
          연식 추정용 차대번호(CAR_INFO). 모두 읽기 권한이며 차량 제어 권한은 쓰지 않는다. -->
     <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <!-- 방향지시등 읽기. Pleos normal 권한이므로 런타임 요청은 필요 없다. -->
+    <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
     <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
     <uses-permission android:name="pleos.car.permission.CAR_CLIMATE" />
     <uses-permission android:name="pleos.car.permission.CAR_INFO" />

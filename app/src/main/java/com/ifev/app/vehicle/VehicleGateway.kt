@@ -10,6 +10,7 @@ import ai.pleos.playground.vehicle.listener.FuelPercentListener
 import ai.pleos.playground.vehicle.listener.GearSelectionListener
 import ai.pleos.playground.vehicle.listener.HvacPowerStateListener
 import android.content.Context
+import com.ifev.app.data.GearState
 import com.ifev.app.engine.kmPerLiterFromLitersPer100Km
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -21,7 +22,7 @@ import kotlin.coroutines.resume
 
 /** What the app reads from the car. Every value is read-only: the app never controls the vehicle. */
 sealed interface CarSignal {
-    data class Gear(val parked: Boolean) : CarSignal
+    data class Gear(val parked: Boolean, val state: GearState = if (parked) GearState.PARK else GearState.DRIVE) : CarSignal
     data class Odometer(val km: Double) : CarSignal
     data class FuelPercent(val percent: Int) : CarSignal
     /** Average of the trip in progress, km/L (the SDK's L/100 km converted). */
@@ -34,10 +35,13 @@ sealed interface CarSignal {
     data class EvEfficiency(val kmPerKwh: Double) : CarSignal
 }
 
-/** Everything the app does through the Pleos Vehicle SDK. Permissions: CAR_DRIVE, CAR_ENERGY, CAR_CLIMATE, CAR_INFO. */
+/** Pleos read permissions: CAR_DRIVE, CAR_ENERGY, CAR_CLIMATE, CAR_INFO, CAR_LIGHTS. */
 class VehicleGateway(context: Context, private val log: (String) -> Unit) {
 
     private val vehicle = Vehicle(context.applicationContext)
+
+    /** Drawing signals share this SDK connection but do not enter the trip engine's event queue. */
+    fun motion(): Flow<MotionState> = MotionSignals(vehicle, log).states()
 
     fun start() {
         runCatching { vehicle.initialize() }.onFailure { log("차량 SDK 초기화 실패: ${it.message}") }
@@ -57,7 +61,7 @@ class VehicleGateway(context: Context, private val log: (String) -> Unit) {
 
         val gearListener = object : GearSelectionListener {
             override fun onSelected(gear: VehicleGear?) {
-                if (gear != null && gear != VehicleGear.GEAR_UNKNOWN) trySend(CarSignal.Gear(gear == VehicleGear.GEAR_PARK))
+                trySend(CarSignal.Gear(gear == VehicleGear.GEAR_PARK, gearStateFromPleos(gear)))
             }
             override fun onFailed(e: Exception) = failed("기어")(e)
         }
@@ -118,7 +122,7 @@ class VehicleGateway(context: Context, private val log: (String) -> Unit) {
         climateArea?.let { guard("공조 구독") { hvac.registerHvacPowerState(it, climateListener) } }
 
         // Listeners only fire on change; read the current values once so the screen is filled at start.
-        guard("기어 조회") { gear.getCurrentGearSelectionState({ g -> if (g != null && g != VehicleGear.GEAR_UNKNOWN) trySend(CarSignal.Gear(g == VehicleGear.GEAR_PARK)) }, failed("기어 조회")) }
+        guard("기어 조회") { gear.getCurrentGearSelectionState({ g -> trySend(CarSignal.Gear(g == VehicleGear.GEAR_PARK, gearStateFromPleos(g))) }, failed("기어 조회")) }
         guard("누적 주행거리 조회") { odometer.getCurrentDistanceDriven({ km -> if (km != null) trySend(CarSignal.Odometer(km.toDouble())) }, failed("누적 주행거리 조회")) }
         guard("연료량 조회") { fuel.getFuelPercent({ p -> if (p != null) trySend(CarSignal.FuelPercent(p)) }, failed("연료량 조회")) }
         guard("평균 연비 조회") { fuel.getCumulativeFuelEconomy({ v -> v?.toDouble()?.let(::kmPerLiterFromLitersPer100Km)?.let { trySend(CarSignal.AverageFuelEconomy(it)) } }, failed("평균 연비 조회")) }

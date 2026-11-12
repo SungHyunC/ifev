@@ -48,6 +48,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -60,6 +62,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     enum class Mode { LIVE, DEMO }
     enum class Stage { DAY_ZERO, DRIVING, FOUR_WEEKS, REAL }
     enum class Tab { PRELIM, MEASURED, REPORT }
+
+    /** The virtual EV (main) or the report pages; the report is reachable only while parked. */
+    enum class Screen { HOME, REPORT }
 
     data class UiState(
         val mode: Mode,
@@ -112,7 +117,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val levers: Levers.Result?,
         /** Virtual regenerative braking on the drive in progress, kWh. */
         val tripRegenKwh: Double,
+        val screen: Screen,
     )
+
+    /** What the car is doing now, for the top view, and how hard the imagined EV is recovering energy (0..1). */
+    data class VisualNow(val state: com.ifev.app.data.VehicleVisualState, val regenLevel: Double)
 
     data class CarFact(val label: String, val value: String?, val api: String)
 
@@ -128,6 +137,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val realSource: String? = null,
         /** The demo drive's virtual regeneration (the live drive's comes from the recorder). */
         val demoRegenKwh: Double = 0.0,
+        val screen: Screen = Screen.HOME,
     )
 
     private val recorder = app.recorder
@@ -167,6 +177,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectTab(tab: Tab) = local.update { it.copy(tab = tab) }
 
+    /** The report pages open only while parked; driving always brings the virtual EV back. */
+    fun openReport(tab: Tab? = null) {
+        if (liveDriving) return
+        local.update { it.copy(screen = Screen.REPORT, tab = tab ?: it.tab) }
+    }
+
+    fun closeReport() = local.update { it.copy(screen = Screen.HOME) }
+
     fun selectModel(model: EvModel) = editSettings { it.copy(modelId = model.id) }
 
     fun answerHomeCharging(available: Boolean) = editSettings { it.copy(homeCharging = available) }
@@ -197,7 +215,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (liveDriving) return
         narrator.clearLastLine()
         driveJob?.cancel()
-        local.update { it.copy(mode = Mode.DEMO, stage = Stage.DAY_ZERO, tab = Tab.PRELIM, demoCar = DemoScenario.dayZero(), demoTrips = emptyList(), demoNow = null) }
+        local.update { it.copy(screen = Screen.REPORT, mode = Mode.DEMO, stage = Stage.DAY_ZERO, tab = Tab.PRELIM, demoCar = DemoScenario.dayZero(), demoTrips = emptyList(), demoNow = null) }
     }
 
     /**
@@ -208,7 +226,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (liveDriving) return
         narrator.clearLastLine()
         driveJob?.cancel()
-        local.update { it.copy(mode = Mode.DEMO, stage = Stage.DRIVING, tab = Tab.MEASURED, demoTrips = emptyList(), demoNow = null, demoRegenKwh = 0.0) }
+        local.update { it.copy(screen = Screen.HOME, mode = Mode.DEMO, stage = Stage.DRIVING, tab = Tab.MEASURED, demoTrips = emptyList(), demoNow = null, demoRegenKwh = 0.0) }
         driveJob = viewModelScope.launch {
             val settings = local.value.demoSettings
             val model = EvCatalog.byId(settings.modelId)
@@ -222,6 +240,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val destination = DemoScenario.office.name
             fun route(kmDone: Double) = RouteTarget(destination, commute - kmDone, DemoScenario.DRIVE_REAL_MINUTES * (1 - kmDone / commute))
             demoSay(Lines.route(model, destination, RoutePlanner.preview(model, plan.startSoc, commute, DemoScenario.DRIVE_REAL_MINUTES, month(start), plan)))
+            // The car's signals for the top view, ten times a second while the commute plays.
+            val visualJob = launch {
+                while (true) {
+                    val sec = (System.currentTimeMillis() - start) / 1000.0
+                    demoVisual.value = VisualNow(DemoScenario.driveSignals(sec), DemoScenario.driveRegenLevel(sec))
+                    delay(100)
+                }
+            }
             for ((sec, km) in steps) {
                 val simulatedNow = start + realMs * sec / total
                 // Stop-and-go to the office: a stop at about every 0.8 km from 50 km/h.
@@ -243,6 +269,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 delay(1_000)
             }
+            visualJob.cancel()
+            demoVisual.value = PARKED_DEMO
             val end = start + realMs
             val trip = Trip(
                 start, end, commute, Place.HOME, Place.OFFICE, SeoulClimate.meanC(month(end)), 1.0, 11.8, DistanceSource.SPEED,
@@ -268,7 +296,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val d = realDrives.getOrNull(index) ?: return
         driveJob?.cancel()
         local.update {
-            it.copy(
+            it.copy(screen = Screen.REPORT, 
                 mode = Mode.DEMO, stage = Stage.REAL, tab = Tab.REPORT,
                 demoCar = CarState(vehicleStatus = "실제 기록", naviStatus = "실제 기록", parked = true),
                 demoTrips = d.trips, demoNow = d.trips.maxOf { t -> t.endAt },
@@ -299,7 +327,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         narrator.clearLastLine()
         driveJob?.cancel()
         local.update {
-            it.copy(
+            it.copy(screen = Screen.REPORT, 
                 mode = Mode.DEMO, stage = Stage.FOUR_WEEKS, tab = Tab.REPORT,
                 demoCar = DemoScenario.dayZero(), demoTrips = DemoScenario.fourWeeks(), demoNow = DemoScenario.fourWeeksNow,
             )
@@ -395,6 +423,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 Levers.of(model, trips, plan, it, fallbackFuelKmPerL = fuel, nowMs = now)
             },
             tripRegenKwh = if (l.mode == Mode.DEMO) l.demoRegenKwh else car.tripRegenKwh,
+            // Driving always shows the virtual EV; the report is a parked-only page.
+            screen = if (car.driving) Screen.HOME else l.screen,
             lastLine = lastLine?.takeIf { (_, at) -> System.currentTimeMillis() - at < LAST_LINE_MS }?.first,
         )
     }
@@ -424,7 +454,86 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun month(ms: Long) = Instant.ofEpochMilli(ms).atZone(Trip.KST).monthValue
 
+    /**
+     * How hard the imagined EV would be recovering energy right now, 0..1, from how fast this car is
+     * slowing down (about 2.5 m/s² counts as full). Display only: the kWh come from the engine's Regen.
+     */
+    private var lastSpeed: Pair<Double, Long>? = null
+    private var lastRegen = 0.0
+    private fun liveRegen(v: com.ifev.app.data.VehicleVisualState): Double {
+        val speed = v.speedMs ?: return 0.0
+        val at = v.speedAtMs ?: return lastRegen
+        val prev = lastSpeed
+        if (prev != null && prev.second == at) return lastRegen
+        lastSpeed = speed to at
+        if (prev == null) return 0.0
+        val dt = (at - prev.second) / 1000.0
+        val moving = v.gear == com.ifev.app.data.GearState.DRIVE || v.gear == com.ifev.app.data.GearState.REVERSE
+        lastRegen = if (dt in 0.05..3.0 && moving && kotlin.math.abs(speed) > 2.0) {
+            ((kotlin.math.abs(prev.first) - kotlin.math.abs(speed)) / dt / 2.5).coerceIn(0.0, 1.0)
+        } else 0.0
+        return lastRegen
+    }
+
+    private val demoVisual = MutableStateFlow(PARKED_DEMO)
+
+    /** "방금 주행 다시 보기": the last drive's signals played back while parked, where animation is allowed. */
+    private val replayVisual = MutableStateFlow<VisualNow?>(null)
+    private var replayJob: Job? = null
+    val lastDrive: StateFlow<List<com.ifev.app.data.TracePoint>> = recorder.lastDrive
+    val replaying: StateFlow<Boolean> = replayVisual.map { it != null }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun replayLastDrive() {
+        if (liveDriving) return
+        val trace = recorder.lastDrive.value.takeIf { it.size >= 2 } ?: return
+        replayJob?.cancel()
+        replayJob = viewModelScope.launch {
+            val t0 = trace.first().tMs
+            val started = android.os.SystemClock.elapsedRealtime()
+            var prev: com.ifev.app.data.TracePoint? = null
+            for (p in trace) {
+                // Played at twice the speed; the car is parked, so the view may animate.
+                val due = started + (p.tMs - t0) / REPLAY_SPEEDUP
+                val wait = due - android.os.SystemClock.elapsedRealtime()
+                if (wait > 0) delay(wait)
+                val now = android.os.SystemClock.elapsedRealtime()
+                val regen = prev?.let { a ->
+                    val dt = (p.tMs - a.tMs) / 1000.0
+                    val v0 = kotlin.math.abs(a.speedMs ?: 0.0)
+                    val v1 = kotlin.math.abs(p.speedMs ?: 0.0)
+                    if (dt > 0 && v1 > 2.0) ((v0 - v1) / dt / 2.5).coerceIn(0.0, 1.0) else 0.0
+                } ?: 0.0
+                prev = p
+                replayVisual.value = VisualNow(
+                    com.ifev.app.data.VehicleVisualState(
+                        speedMs = p.speedMs, speedAtMs = now, gear = p.gear, steeringDeg = p.steeringDeg, steeringAtMs = now,
+                        brake = p.brake, turn = p.turn, climateOn = p.climateOn, restricted = false,
+                        steeringAvailable = p.steeringDeg != null, brakeAvailable = p.brake != null, turnAvailable = true,
+                    ),
+                    regen,
+                )
+            }
+            delay(1_000)
+            replayVisual.value = null
+        }
+    }
+
+    /** The top view's input, apart from the heavy report state: updated as often as the signals change. */
+    val visual: StateFlow<VisualNow> = combine(local.map { it.mode }.distinctUntilChanged(), demoVisual, recorder.visual, replayVisual) { mode, demo, live, replay ->
+        when {
+            mode == Mode.DEMO -> demo
+            // A replay stops the moment the car leaves P.
+            replay != null && live.gear == com.ifev.app.data.GearState.PARK -> replay
+            else -> VisualNow(live, liveRegen(live))
+        }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, PARKED_DEMO)
+
     private companion object {
+        const val REPLAY_SPEEDUP = 2
+        val PARKED_DEMO = VisualNow(
+            com.ifev.app.data.VehicleVisualState(gear = com.ifev.app.data.GearState.PARK, speedMs = 0.0, steeringDeg = 0.0, climateOn = true),
+            0.0,
+        )
         const val TICK_MS = 1_000L
         const val LAST_LINE_MS = 3 * 60_000L
     }

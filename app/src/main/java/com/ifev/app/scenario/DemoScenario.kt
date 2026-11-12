@@ -118,4 +118,55 @@ object DemoScenario {
 
     /** Traffic lights on the commute: one stop about every 0.8 km. */
     const val STOP_EVERY_KM = 0.8
+
+    /** One stop-and-go cycle of the played-back commute, seconds: pull away, cruise, brake, wait. */
+    private const val CYCLE_S = 14.0
+    private const val CRUISE_MS = 50 / 3.6
+
+    /**
+     * The car's signals during the played-back commute, for the top view: stop-and-go at the lights,
+     * a left turn and a right turn with the indicator on. Made-up like the rest of the demo, and drawn
+     * as if parked (the emulator really is in P), so the view animates freely.
+     */
+    fun driveSignals(sec: Double): com.ifev.app.data.VehicleVisualState {
+        val t = sec % CYCLE_S
+        val speed = when {
+            t < 5 -> CRUISE_MS * t / 5
+            t < 9 -> CRUISE_MS
+            t < 12.5 -> CRUISE_MS * (12.5 - t) / 3.5
+            else -> 0.0
+        }
+        val braking = t in 9.0..13.5
+        fun bump(from: Double, to: Double, peakDeg: Double): Double {
+            if (sec < from || sec > to) return 0.0
+            val x = (sec - from) / (to - from)
+            return peakDeg * kotlin.math.sin(Math.PI * x)
+        }
+        val steering = bump(16.0, 22.0, -24.0) + bump(36.0, 41.0, 20.0)
+        val turn = when {
+            sec in 14.5..21.0 -> com.ifev.app.data.TurnState.LEFT
+            sec in 34.5..40.0 -> com.ifev.app.data.TurnState.RIGHT
+            else -> com.ifev.app.data.TurnState.OFF
+        }
+        return com.ifev.app.data.VehicleVisualState(
+            speedMs = speed,
+            speedAtMs = android.os.SystemClock.elapsedRealtime(),
+            gear = com.ifev.app.data.GearState.DRIVE,
+            steeringDeg = steering,
+            steeringAtMs = android.os.SystemClock.elapsedRealtime(),
+            brake = braking,
+            turn = turn,
+            climateOn = true,
+            restricted = false,
+            steeringAvailable = true,
+            brakeAvailable = true,
+            turnAvailable = true,
+        )
+    }
+
+    /** How hard the played-back commute is braking, 0..1: the share recovered by the motor. */
+    fun driveRegenLevel(sec: Double): Double {
+        val t = sec % CYCLE_S
+        return if (t in 9.0..12.5) 0.85 else 0.0
+    }
 }

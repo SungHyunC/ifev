@@ -6,6 +6,7 @@ import android.car.hardware.CarPropertyValue
 import android.car.hardware.property.CarPropertyManager
 import android.content.Context
 import android.content.pm.PackageManager
+import com.ifev.app.data.GearState
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -29,7 +30,7 @@ class AaosSignals(context: Context, private val log: (String) -> Unit) {
     private val app = context.applicationContext
 
     sealed interface Signal {
-        data class Gear(val parked: Boolean) : Signal
+        data class Gear(val parked: Boolean, val state: GearState = if (parked) GearState.PARK else GearState.DRIVE) : Signal
         data class EvCapacityKwh(val kwh: Double) : Signal
         data class EvLevelKwh(val kwh: Double) : Signal
     }
@@ -48,7 +49,7 @@ class AaosSignals(context: Context, private val log: (String) -> Unit) {
                 if (value.status != CarPropertyValue.STATUS_AVAILABLE) return
                 when (value.propertyId) {
                     VehiclePropertyIds.GEAR_SELECTION -> (value.value as? Int)?.let { g ->
-                        if (g != GEAR_UNKNOWN) trySend(Signal.Gear(g == GEAR_PARK))
+                        trySend(Signal.Gear(g == GEAR_PARK, gearStateFromAaos(g)))
                     }
                     VehiclePropertyIds.EV_BATTERY_LEVEL -> (value.value as? Float)?.let { wh ->
                         if (wh > 0) trySend(Signal.EvLevelKwh(wh / 1000.0))
@@ -108,7 +109,6 @@ class AaosSignals(context: Context, private val log: (String) -> Unit) {
         )
         const val PERMISSION_RETRY_MS = 5_000L
         /** android.car.VehicleGear values. */
-        const val GEAR_UNKNOWN = 0
         const val GEAR_PARK = 4
     }
 }
