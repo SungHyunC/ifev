@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/logo.png" width="96" alt="이프EV 로고"></p>
+<p align="center"><img src="docs/images/logo.png" width="120" alt="이프EV 로고"></p>
 
 <h1 align="center">이프EV (IfEV)</h1>
 
@@ -6,7 +6,7 @@
 내 생활에 전기차가 맞는지, 무엇이 바뀌면 맞게 되는지 차 안의 순간마다 알려 줍니다.</p>
 
 <p align="center">
-<a href="https://github.com/SungHyunC/ifev/releases/download/demo-2026-11-12/IfEV_demo.mp4"><b>▶ 시연 영상 (5분 32초)</b></a> ·
+<a href="https://github.com/SungHyunC/ifev/releases/download/demo-2026-11-12/IfEV_demo.mp4"><b>▶ 시연 영상 (5분 59초)</b></a> ·
 <a href="https://github.com/SungHyunC/ifev/releases/download/demo-2026-11-12/IfEV_release.apk"><b>APK 받기</b></a> ·
 <a href="#실행-방법">실행 방법</a> ·
 <a href="docs/공개데이터_검증.md">공개 데이터 검증</a>
@@ -244,7 +244,7 @@ app/src/main/java/com/ifev/app/
 
 ## 시연 자료
 - 시연 모드의 2~4주 기록은 가상 데이터입니다. 화면 상단과 4주 리포트에 "시연용 가상 데이터", "가상 기록 28일"로 표시하고 신뢰도는 붙이지 않습니다. 실시간 모드의 기록만 실제 주행입니다.
-- `demo/IfEV_demo.mp4` (약 5분 32초, 시연 화면은 앱 부분을 확대. 실시간 내비 구간은 에뮬레이터 내비가 다시 켜지지 않아 이전 빌드 녹화를 그대로 썼습니다): 에뮬레이터 화면 녹화(`adb shell screenrecord`)에 한국어 해설과 자막을 넣은 영상입니다. 순서는 다음과 같습니다.
+- `demo/IfEV_demo.mp4` (약 5분 59초, 시연 화면은 앱 부분을 확대. 실시간 내비 구간은 에뮬레이터 내비가 다시 켜지지 않아 이전 빌드 녹화를 그대로 썼습니다): 에뮬레이터 화면 녹화(`adb shell screenrecord`)에 한국어 해설과 자막을 넣은 영상입니다. 순서는 다음과 같습니다.
   1. 문제 제기
   2. 설치 직후 예비 진단과 집 충전 없음 판정
   3. 시연 출근길(목적지 음성·가상 배터리·가상 회생제동·정차 음성)
