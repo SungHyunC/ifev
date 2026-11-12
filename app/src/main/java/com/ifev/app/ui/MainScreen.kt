@@ -96,7 +96,7 @@ fun MainScreen(ui: UiState, actions: Actions) {
 private fun TopBar(ui: UiState, actions: Actions) {
     val c = LocalPleosColors.current
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Image(painterResource(R.drawable.ic_launcher), contentDescription = null, modifier = Modifier.size(48.dp))
+        Image(painterResource(R.drawable.ic_logo), contentDescription = null, modifier = Modifier.size(48.dp))
         Spacer(Modifier.width(16.dp))
         Text("이프EV", style = PleosType.title, color = c.textPrimary)
         Spacer(Modifier.width(24.dp))
