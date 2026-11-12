@@ -19,9 +19,9 @@ object Lines {
         return head + stops
     }
 
-    fun parked(model: EvModel, trip: Trip, kwh: Double, won: Double, homeCharging: Boolean, socAfter: Double): String =
+    fun parked(model: EvModel, trip: Trip, kwh: Double, plan: ChargingPlan, socAfter: Double, prices: Prices = Prices()): String =
         "방금 ${km(trip.distanceKm)}. ${model.ifItWere} 전기 ${"%.1f".format(kwh)}킬로와트시, " +
-            "${if (homeCharging) "집 충전으로" else "급속 충전으로"} 약 ${won.roundToInt()}원이에요. " +
+            "${plan.everydayCharger}으로 약 ${(kwh * plan.everydayPerKwh(prices)).roundToInt()}원이에요. " +
             regenClause(trip.regenKwh, kwh) +
             "가상 배터리는 ${pct(socAfter)} 남았어요."
 
@@ -45,9 +45,9 @@ object Lines {
     fun departedAfterCharging(model: EvModel, soc: Double, where: String = "집에서"): String =
         "${model.ifItWere} 세워 둔 사이 $where ${pct(soc)}까지 충전하고 출발해요."
 
-    fun refueled(model: EvModel, c: RefuelCompare, homeCharging: Boolean): String =
+    fun refueled(model: EvModel, c: RefuelCompare, plan: ChargingPlan): String =
         "방금 주유하셨네요. 지난 주유 뒤로 달린 ${km(c.km)}에 기름값이 약 ${won(c.fuelWon)} 들었어요. " +
-            "${model.ifItWere} ${if (homeCharging) "집 충전으로" else "급속 충전으로"} 약 ${won(c.evWon)}이에요."
+            "${model.ifItWere} ${plan.everydayCharger}으로 약 ${won(c.evWon)}이에요."
 
     /** "4만 6천 원", rounded to the thousand, the way it is said. */
     fun won(v: Double): String {

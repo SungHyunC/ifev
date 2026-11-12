@@ -84,11 +84,15 @@ object Levers {
             // What would break it: losing the home charger (moving, a new car park), and what saves it then.
             val out = mutableListOf<Lever>()
             if (plan.homeCharging) {
-                val noHome = plan.copy(homeCharging = false, workCharging = false)
+                // Only the home charger goes; an office charger the driver has stays.
+                val noHome = plan.copy(homeCharging = false)
                 lever("집 충전기를 못 쓰게 되면", "이사하거나 아파트 충전기가 늘 차 있으면", replay(model, noHome))?.let(out::add)
                 if (hasOfficeStays && !plan.workCharging) {
                     lever("집 충전 없이 회사 주차장 완속만 있으면", officeBecause, replay(model, noHome.copy(workCharging = true)))?.let(out::add)
                 }
+            }
+            if (plan.workCharging) {
+                lever("회사 충전기를 못 쓰게 되면", "이직하거나 회사 충전기가 늘 차 있으면", replay(model, plan.copy(workCharging = false)))?.let(out::add)
             }
             return Result(parking, improving = false, levers = out)
         }

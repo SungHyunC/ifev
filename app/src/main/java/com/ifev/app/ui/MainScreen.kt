@@ -146,9 +146,9 @@ private fun DemoBar(ui: UiState, actions: Actions) {
 private fun DrivingView(ui: UiState) {
     val c = LocalPleosColors.current
     // Priced the way the driver charges: at home (slow) or, without a home charger, at a fast charger.
-    val homeCharging = ui.settings.homeCharging != false
-    val homeWon = ui.tripKwh * if (homeCharging) Prices().homePerKwh else Prices().fastPerKwh
-    val costLabel = if (homeCharging) "집 충전" else "급속 충전"
+    val plan = ui.settings.plan()
+    val homeWon = ui.tripKwh * plan.everydayPerKwh()
+    val costLabel = plan.everydayCharger
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             Gauge(
@@ -479,12 +479,17 @@ private fun ReportView(ui: UiState, actions: Actions) {
         Text("기록한 ${r.days}일을 한 달로 보면, 이 차가 ${ui.model.ifItWere}", style = PleosType.title, color = c.textSecondary)
         Spacer(Modifier.height(8.dp))
         Text(r.verdict.titleFor(ui.settings.plan()), style = PleosType.headline, color = verdictColor(r.verdict))
+        if (ui.realSource?.contains("VED") == true) {
+            // The public dataset trims trip ends and keeps only Ann Arbor: it understates charging.
+            Label("공개 데이터는 주행 앞뒤와 시 경계 밖이 지워져 있어요. 장거리가 빠져 충전 부담이 실제보다 가볍게 나와요.", style = PleosType.labelSmall)
+        }
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             Stat(
                 "충전",
                 "%.0f번".format((m.homeCharges ?: 0.0) + (m.workCharges ?: 0.0) + m.fastCharges),
-                if (m.homeCharges != null) "집 %.0f · 급속 %.0f".format(m.homeCharges, m.fastCharges)
+                if (m.homeCharges != null && m.workCharges != null) "집 %.0f · 회사 %.0f · 급속 %.0f".format(m.homeCharges, m.workCharges, m.fastCharges)
+                else if (m.homeCharges != null) "집 %.0f · 급속 %.0f".format(m.homeCharges, m.fastCharges)
                 else if (m.workCharges != null) "회사 %.0f · 급속 %.1f".format(m.workCharges, m.fastCharges)
                 else if (m.fastEnRoute >= 0.05) "평소 급속 %.1f · 장거리 날 %.1f".format(m.fastRoutine, m.fastEnRoute)
                 else "모두 평소 급속",
@@ -591,18 +596,19 @@ private fun LeversCard(ui: UiState, l: com.ifev.app.engine.Levers.Result, action
                 Badge(shortVerdict(lever.verdict), verdictColor(lever.verdict), c.surfaceHigh)
             }
         }
-        if (l.levers.isEmpty()) Label("집 충전기가 있으면 판정은 그대로예요.")
-        if (p.officeDays >= 2 && ui.settings.workCharging == null) {
+        if (l.levers.isEmpty()) Label("기록 안에서는 판정을 바꿀 조건을 찾지 못했어요.")
+        // Always answerable, and changeable later (a new job, a full charger).
+        if (p.officeDays >= 2 || ui.settings.workCharging != null) {
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("회사 주차장에 완속 충전기가 있나요?", style = PleosType.bodySmallStrong, color = c.textPrimary, modifier = Modifier.weight(1f))
-                PleosButton("있어요", false, { actions.onWorkCharging(true) })
+                Column(Modifier.weight(1f)) {
+                    Text("회사 주차장에 완속 충전기가 있나요?", style = PleosType.bodySmallStrong, color = c.textPrimary)
+                    if (ui.settings.workCharging == true) Label("회사 주차장 완속 충전(7kW)을 넣어 계산했어요.", style = PleosType.labelSmall)
+                }
+                PleosButton("있어요", ui.settings.workCharging == true, { actions.onWorkCharging(true) })
                 Spacer(Modifier.width(12.dp))
-                PleosButton("없어요", false, { actions.onWorkCharging(false) })
+                PleosButton("없어요", ui.settings.workCharging == false, { actions.onWorkCharging(false) })
             }
-        } else if (ui.settings.workCharging == true) {
-            Spacer(Modifier.height(8.dp))
-            Label("회사 주차장 완속 충전(7kW)을 넣어 계산했어요.", style = PleosType.labelSmall)
         }
     }
 }
@@ -648,7 +654,7 @@ private fun WinterCard(now: com.ifev.app.engine.MeasuredReport, w: com.ifev.app.
     val c = LocalPleosColors.current
     val n = now.monthly
     val m = w.monthly
-    fun charges(x: com.ifev.app.engine.Monthly) = (x.homeCharges ?: 0.0) + x.fastCharges
+    fun charges(x: com.ifev.app.engine.Monthly) = (x.homeCharges ?: 0.0) + (x.workCharges ?: 0.0) + x.fastCharges
     Card(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("같은 기록을 1월에 했다면", style = PleosType.bodyStrong, color = c.textPrimary)

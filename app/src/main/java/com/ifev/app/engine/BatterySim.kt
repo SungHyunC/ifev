@@ -29,7 +29,17 @@ data class ChargingPlan(
     val workCharging: Boolean = false,
     /** A 7 kW wall box or public slow charger. */
     val slowKw: Double = 7.0,
-)
+) {
+    /** Where everyday driving is charged, as said aloud: "집 충전", "회사 충전" or "급속 충전". */
+    val everydayCharger: String get() = when {
+        homeCharging -> "집 충전"
+        workCharging -> "회사 충전"
+        else -> "급속 충전"
+    }
+
+    /** The price of that everyday charging: slow at home or the office, fast otherwise. */
+    fun everydayPerKwh(prices: Prices = Prices()): Double = if (homeCharging || workCharging) prices.homePerKwh else prices.fastPerKwh
+}
 
 data class DaySummary(
     val date: LocalDate,
@@ -70,6 +80,8 @@ data class SimResult(
     val longestTripKm: Double,
     val endSoc: Double,
     val days: List<DaySummary>,
+    /** Battery on arriving from the last trip, before any charging while parked after it. */
+    val lastArrivalSoc: Double = endSoc,
 ) {
     /**
      * Fuel minus electricity over the same distance. Trips without a fuel economy reading are left out
@@ -120,6 +132,7 @@ object BatterySim {
         var parkedOverlap = 0.0
         var fuelCost = 0.0
         var fuelUnknownKm = 0.0
+        var arrivalSoc = soc
         val days = LinkedHashMap<LocalDate, DayAcc>()
 
         /** Returns the minutes the charge takes. */
@@ -149,6 +162,7 @@ object BatterySim {
                 stops++
             }
             soc -= remaining
+            arrivalSoc = soc
             day.minSoc = min(day.minSoc, soc)
             day.km += trip.distanceKm
             minSoc = min(minSoc, day.minSoc)
@@ -187,8 +201,10 @@ object BatterySim {
                     day.home++
                 }
             } else if (soc < plan.publicChargeBelow) {
-                // Charged where the car was parked anyway: that much of the time is not extra waiting.
-                parkedOverlap += min(fastCharge(plan.fastChargeTo), parkedHours * 60)
+                // Away from home (a mart, the destination) the charge overlaps time parked there anyway.
+                // Parked at home without a charger, it means driving to a public charger and waiting.
+                val minutes = fastCharge(plan.fastChargeTo)
+                if (trip.endPlace != Place.HOME) parkedOverlap += min(minutes, parkedHours * 60)
                 day.fast++
             }
             day.endSoc = soc
@@ -199,7 +215,7 @@ object BatterySim {
         val charged = slowKwh + fastKwh
         fun cost(home: Double, fast: Double): Double {
             val perKwh = if (charged > 0) (slowKwh * home + fastKwh * fast) / charged
-            else if (plan.homeCharging) home else fast
+            else if (plan.homeCharging || plan.workCharging) home else fast
             return drivenKwh * perKwh
         }
         val summaries = days.map { (date, d) -> DaySummary(date, d.km, d.minSoc, d.endSoc, d.home, d.fast, d.work) }
@@ -226,6 +242,7 @@ object BatterySim {
             longestTripKm = sorted.maxOfOrNull { it.distanceKm } ?: 0.0,
             endSoc = soc,
             days = summaries,
+            lastArrivalSoc = arrivalSoc,
         )
     }
 

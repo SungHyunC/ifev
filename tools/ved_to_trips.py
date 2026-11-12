@@ -254,13 +254,14 @@ def ev_rows(inputs, vehs, out_path):
                 ts = float(row[ix["ts"]]) / 1000.0
                 t = acc.get(key)
                 if t is None:
-                    t = acc[key] = dict(last=None, max=0.0, km=0.0, dur=0.0, hvJ=0.0, hvS=0.0, oatS=0.0, oatSum=0.0,
+                    t = acc[key] = dict(last=None, max=0.0, km=0.0, dur=0.0, tot=0.0, hvJ=0.0, hvS=0.0, oatS=0.0, oatSum=0.0,
                                         heatS=0.0, heatSum=0.0, acS=0.0, acSum=0.0)
                 dt = 0.0 if t["last"] is None else ts - t["last"]
                 if dt < 0 or dt > MAX_DT_S:
                     dt = 0.0
                 t["last"] = ts
                 t["max"] = max(t["max"], ts)
+                t["tot"] += dt
                 g = lambda k: num(row[ix[k]]) if k in ix else None
                 sp = g("speed")
                 if sp is not None:
@@ -287,9 +288,13 @@ def ev_rows(inputs, vehs, out_path):
         print(f"  읽음: {os.path.basename(path)}", file=sys.stderr)
     rows, dropped = [], Counter()
     for (v, trip), t in sorted(acc.items(), key=lambda kv: (int(kv[0][0]), kv[0][1])):
-        dur = max(t["dur"], 1e-9)
+        # Every coverage is measured against all sampled time, so a trip with speed for only part
+        # of it (distance too short for the battery energy) is dropped rather than kept.
+        dur = max(t["tot"], 1e-9)
         if t["km"] < 1:
             dropped["km<1"] += 1
+        elif t["dur"] / dur <= COVER:
+            dropped["speed"] += 1
         elif t["hvS"] / dur <= COVER:
             dropped["battery"] += 1
         elif t["oatS"] / dur <= COVER:

@@ -80,7 +80,8 @@ class TripRecorder(
         if (prev == null) return
         val dtMs = (at - maxOf(prev.second, o.startAt)).coerceIn(0, MAX_SPEED_GAP_MS)
         o.speedKm += prev.first * dtMs / 1_000_000.0
-        if (dtMs > 0) o.regenKwh += Regen.recoveredKwh(prev.first, metersPerSecond.coerceAtLeast(0.0), dtMs / 1000.0)
+        // A gap in samples is not a braking event: only consecutive samples count for regeneration.
+        if (dtMs > 0 && at - prev.second <= MAX_SPEED_GAP_MS) o.regenKwh += Regen.recoveredKwh(prev.first, metersPerSecond.coerceAtLeast(0.0), dtMs / 1000.0)
     }
 
     /** What an EV would have recovered braking on this trip so far, kWh. */

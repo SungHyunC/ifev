@@ -84,7 +84,9 @@ class Narrator(private val recorder: LiveRecorder, private val voice: Voice) {
             is Moment.Departed -> {
                 if (trips.isEmpty()) return null
                 val last = trips.maxBy { it.endAt }
-                val before = BatterySim.run(model, trips, plan, nowMs = last.endAt).endSoc
+                // On arrival, before anything the replay charged while parked (without a home charger it
+                // charges below 30 % the moment the car parks, so the end of the last trip is too late).
+                val before = BatterySim.run(model, trips, plan, nowMs = last.endAt).lastArrivalSoc
                 val after = BatterySim.run(model, trips, plan, nowMs = m.atMs).endSoc
                 when {
                     after <= before + 0.01 -> null
@@ -100,14 +102,12 @@ class Narrator(private val recorder: LiveRecorder, private val voice: Voice) {
             is Moment.Refueled -> {
                 val since = trips.filter { t -> m.previousRefuelAt == null || t.startAt >= m.previousRefuelAt }
                 val fallback = resolveFuelEconomy(car.averageFuelKmPerL, FuelCarCatalog.byId(settings.myCarId)).first
-                Moments.sinceRefuel(model, since, plan, fallback)?.let { Lines.refueled(model, it, plan.homeCharging) }
+                Moments.sinceRefuel(model, since, plan, fallback)?.let { Lines.refueled(model, it, plan) }
             }
             is Moment.Parked -> {
                 val kwh = m.trip.distanceKm * EnergyModel.kwhPerKm(model, m.trip.tempC, m.trip.avgSpeedKmh, m.trip.climateShare)
-                val prices = Prices()
-                val won = kwh * if (plan.homeCharging) prices.homePerKwh else prices.fastPerKwh
                 val socAfter = BatterySim.run(model, trips, plan, nowMs = m.trip.endAt).endSoc
-                Lines.parked(model, m.trip, kwh, won, plan.homeCharging, socAfter)
+                Lines.parked(model, m.trip, kwh, plan, socAfter)
             }
         }
     }

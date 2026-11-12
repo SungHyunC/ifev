@@ -108,7 +108,7 @@ class ReviewFixes2Test {
         val c = Moments.sinceRefuel(m, since, home, 13.6)!!
         assertTrue(c.km > 100)
         assertTrue(c.evWon < c.fuelWon / 2)
-        val line = Lines.refueled(m, c, true)
+        val line = Lines.refueled(m, c, home)
         assertTrue(line.startsWith("방금 주유하셨네요."))
         assertEquals("4만 6천 원", Lines.won(46_200.0))
         assertEquals("3천 원", Lines.won(2_800.0))

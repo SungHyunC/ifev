@@ -37,7 +37,7 @@ object Moments {
             kwh += t.distanceKm * EnergyModel.kwhPerKm(model, t.tempC, t.avgSpeedKmh, t.climateShare)
         }
         if (km <= 0) return null
-        val perKwh = if (plan.homeCharging) prices.homePerKwh else prices.fastPerKwh
+        val perKwh = plan.everydayPerKwh(prices)
         return RefuelCompare(km, fuel, kwh * perKwh, trips.size)
     }
 

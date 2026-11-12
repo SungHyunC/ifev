@@ -110,14 +110,16 @@ object Measured {
             // Long trips the same way, at 10 → 80 % top-ups: on the way and at the destination both count.
             steady = 0.0
             home = null
-            // What the office charger put in covers everyday driving first.
-            routine = (kwh(everydayTrips) - sim.workKwh).coerceAtLeast(0.0) / ((plan.fastChargeTo - plan.publicChargeBelow).coerceAtLeast(0.05) * model.batteryKwh) * scale
-            enRoute = kwh(longTrips) / perLongCharge * scale
+            // What the office charger put in covers everyday driving first, then the long trips.
+            val everydayKwh = kwh(everydayTrips)
+            val workLeft = (sim.workKwh - everydayKwh).coerceAtLeast(0.0)
+            routine = (everydayKwh - sim.workKwh).coerceAtLeast(0.0) / ((plan.fastChargeTo - plan.publicChargeBelow).coerceAtLeast(0.05) * model.batteryKwh) * scale
+            enRoute = (kwh(longTrips) - workLeft).coerceAtLeast(0.0) / perLongCharge * scale
         }
         val perRoutineMin = (plan.fastChargeTo - plan.publicChargeBelow) * model.batteryKwh / plan.fastKw * 60 + plan.fastOverheadMin
         val perLongMin = perLongCharge / plan.fastKw * 60 + plan.fastOverheadMin
         val fastMinutes = if (plan.homeCharging) sim.fastMinutes * scale else routine * perRoutineMin + enRoute * perLongMin
-        val parkedShare = if (sim.fastMinutes > 0) sim.fastMinutesWhileParked / sim.fastMinutes else if (plan.homeCharging) 0.0 else 1.0
+        val parkedShare = if (sim.fastMinutes > 0) sim.fastMinutesWhileParked / sim.fastMinutes else 0.0
         val monthly = Monthly(
             km = sim.totalKm * scale,
             homeCharges = home,
@@ -142,7 +144,8 @@ object Measured {
             plan.homeCharging && routineLow == 0 -> Verdict.GOOD
             plan.homeCharging -> Verdict.CONDITIONAL
             // An office charger that covers everyday life works like one at home.
-            plan.workCharging && routine < 1.0 && routineLow == 0 -> Verdict.GOOD
+            // Only when the record shows the car standing at the office for hours, not on the answer alone.
+            plan.workCharging && sim.workCharges > 0 && Parking.of(trips).officeDays >= 2 && routine < 1.0 && routineLow == 0 -> Verdict.GOOD
             routine <= Preliminary.MAX_FAST_PER_MONTH_FOR_EV -> Verdict.CONDITIONAL
             else -> Verdict.HYBRID_BETTER
         }

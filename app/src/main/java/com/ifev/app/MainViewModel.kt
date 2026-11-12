@@ -257,7 +257,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val kwh = trip.distanceKm * EnergyModel.kwhPerKm(model, trip.tempC, trip.avgSpeedKmh, trip.climateShare)
             val after = BatterySim.run(model, listOf(trip), plan, nowMs = trip.endAt).endSoc
-            demoSay(Lines.parked(model, trip, kwh, kwh * Prices().homePerKwh, plan.homeCharging, after))
+            demoSay(Lines.parked(model, trip, kwh, plan, after))
         }
     }
 
@@ -290,7 +290,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val model = EvCatalog.byId(settings.modelId)
         val plan = settings.plan()
         val since = DemoScenario.fourWeeks().filter { it.startAt >= DemoScenario.fourWeeksNow - DemoScenario.REFUEL_EVERY_MS }
-        Moments.sinceRefuel(model, since, plan, DemoScenario.dayZero().averageFuelKmPerL)?.let { demoSay(Lines.refueled(model, it, plan.homeCharging)) }
+        Moments.sinceRefuel(model, since, plan, DemoScenario.dayZero().averageFuelKmPerL)?.let { demoSay(Lines.refueled(model, it, plan)) }
     }
 
     /** Demo stage ③: four recorded weeks, compared with the day-one estimate. */
