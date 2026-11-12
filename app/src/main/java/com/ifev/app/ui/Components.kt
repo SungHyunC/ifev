@@ -20,6 +20,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -158,5 +162,47 @@ fun Bullets(lines: List<String>, style: TextStyle = PleosType.bodySmall, color: 
                 Text(line, style = style, color = color)
             }
         }
+    }
+}
+
+/**
+ * One line that says what is inside, opened on demand. The screen leads with the answer; the
+ * reasoning, tables and sources wait behind a tap so a glance is enough to decide.
+ */
+@Composable
+fun Expandable(title: String, summary: String?, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalPleosColors.current
+    var open by rememberSaveable(title) { mutableStateOf(false) }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(c.surface),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { open = !open }
+                .heightIn(min = 88.dp)
+                .padding(horizontal = 32.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, style = PleosType.bodySmallStrong, color = c.textPrimary, modifier = Modifier.width(360.dp))
+            Text(summary ?: "", style = PleosType.bodySmall, color = c.textSecondary, modifier = Modifier.weight(1f))
+            Text(if (open) "접기" else "자세히", style = PleosType.labelStrong, color = c.textTertiary)
+        }
+        if (open) {
+            Column(Modifier.fillMaxWidth().padding(start = 32.dp, end = 32.dp, bottom = 28.dp), content = content)
+        }
+    }
+}
+
+/** A number inside a card: the value large, what it is small underneath. */
+@Composable
+fun RowScope.BigNumber(value: String, label: String, color: Color = LocalPleosColors.current.textPrimary) {
+    Column(Modifier.weight(1f)) {
+        Text(value, style = PleosType.title, color = color)
+        Spacer(Modifier.height(4.dp))
+        Label(label)
     }
 }
