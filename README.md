@@ -1,4 +1,42 @@
-# 이프EV (If EV)
+<p align="center"><img src="docs/images/logo.png" width="96" alt="이프EV 로고"></p>
+
+<h1 align="center">이프EV (IfEV)</h1>
+
+<p align="center"><b>지금 타는 내 차로 4주 동안 '가상 전기차'를 타 보는 Pleos Connect 앱</b><br>
+내 생활에 전기차가 맞는지, 무엇이 바뀌면 맞게 되는지 차 안의 순간마다 알려 줍니다.</p>
+
+<p align="center">
+<a href="https://github.com/SungHyunC/ifev/releases/download/demo-2026-11-12/IfEV_demo.mp4"><b>▶ 시연 영상 (5분 32초)</b></a> ·
+<a href="https://github.com/SungHyunC/ifev/releases/download/demo-2026-11-12/IfEV_release.apk"><b>APK 받기</b></a> ·
+<a href="#실행-방법">실행 방법</a> ·
+<a href="docs/공개데이터_검증.md">공개 데이터 검증</a>
+</p>
+
+<p align="center"><img src="docs/images/demo.gif" width="800" alt="이프EV 시연 GIF: 설치 직후 진단, 출근길 가상 배터리, 4주 리포트, 회사 주차장 충전기로 판정이 바뀌는 장면"></p>
+
+<p align="center"><a href="https://github.com/SungHyunC/ifev/releases/download/demo-2026-11-12/IfEV_demo.mp4"><img src="docs/images/video_thumb.png" width="560" alt="시연 영상 보기"></a><br>
+<sub>영상은 에뮬레이터 화면 녹화에 한국어 해설과 자막을 넣었습니다. 시연의 4주 기록은 가상 데이터이고, 화면에 그렇게 표시합니다. 저장소의 <a href="demo/IfEV_demo.mp4"><code>demo/IfEV_demo.mp4</code></a>와 같은 파일입니다.</sub></p>
+
+## 한눈에 보기
+
+| ① 설치 직후 | ② 출근길 | ③ 4주 뒤 |
+|---|---|---|
+| <img src="docs/images/01_day_zero.png" alt="설치 직후 예비 진단"> | <img src="docs/images/03_drive.png" alt="출근길 가상 배터리"> | <img src="docs/images/05_report.png" alt="4주 리포트"> |
+| 차와 내비에 이미 있는 기록(누적 주행거리·연비·집과 회사·최근 목적지)으로 **설치 1분 만에** 예비 진단 | 연료 게이지 옆에 "아이오닉 6였다면 배터리 88%". 목적지를 찍으면 음성으로 도착 배터리를 알려 주고, 감속하면 가상 회생제동이 쌓임 | 판정 한 줄과 숫자 셋(한 달 충전·아끼는 기름값·20% 미만인 날). 근거와 표는 접혀 있음 |
+
+| 판정을 바꾸는 한 가지 | 회사 주차장 충전기가 있으면 | 주유하는 순간 |
+|---|---|---|
+| <img src="docs/images/06_what_changes.png" alt="판정을 바꾸는 한 가지"> | <img src="docs/images/07_office_charger.png" alt="회사 주차장 충전으로 바뀐 판정"> | <img src="docs/images/08_refuel.png" alt="주유하는 순간"> |
+| 기어 P 기록으로 차가 오래 서 있던 곳(밤 집 13시간, 평일 회사 10시간)을 찾아 같은 기록을 다시 계산 | "있어요"를 누르면 "급속 생활 가능" → **"회사 주차장 충전이면 충분해요"** | 연료량이 오르는 순간 "지난 주유 뒤 698km에 기름값 9만 1천 원, 전기차였다면 3만 4천 원" |
+
+| 같은 경로, 두 계산 (실시간) | 공개 실주행 데이터 (VED) | 야간 모드 |
+|---|---|---|
+| <img src="docs/images/12_navi_check.png" alt="현대차 내비와 이프EV 계산 비교"> | <img src="docs/images/09_public_data.png" alt="공개 실주행 데이터 리포트"> | <img src="docs/images/10_night.png" alt="야간 모드"> |
+| 에뮬레이터 차(전기차)의 현대차 내비 도착 배터리 64% vs 이프EV 58% | 미국 공개 데이터셋 가솔린차의 실제 4주를 같은 엔진으로 | Pleos 야간 색상 자동 전환 |
+
+전체 화면 캡처 19장은 [`demo/`](demo/)에 있습니다.
+
+## 소개
 
 **지금 타는 내 차로 4주 동안 '가상 전기차'를 타 보는 Pleos Connect 앱입니다.** 설치 직후에는 차와 내비에 이미 있는 기록으로 **예비 진단**을 바로 보여 줍니다. 목적지를 찍을 때와 정차할 때는 "이 차가 전기차였다면"을 한 문장으로 말해 줍니다. 2~4주 동안 자동으로 쌓인 주행으로 **4주 실측 진단**을 만들어 충전 횟수, 비용, 배터리 걱정을 예비 진단과 비교합니다. 판정에서 멈추지 않고, 같은 기록을 한 가지만 바꿔 다시 돌려 **무엇이 바뀌면 판정이 바뀌는지**(회사 주차장 완속, 집 충전기, 큰 배터리)도 알려 줍니다. 현대자동차그룹 차량용 앱 개발 공모전 출품작입니다.
 
