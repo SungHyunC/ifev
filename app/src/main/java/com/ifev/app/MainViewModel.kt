@@ -118,6 +118,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         /** Virtual regenerative braking on the drive in progress, kWh. */
         val tripRegenKwh: Double,
         val screen: Screen,
+        /**
+         * Nothing may be pressed: the real car is not confirmed in P, or the car restricts the screen
+         * (or the demo commute is playing). Every touch target hides on this, demo or not.
+         */
+        val locked: Boolean,
     )
 
     /** What the car is doing now, for the top view, and how hard the imagined EV is recovering energy (0..1). */
@@ -138,6 +143,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         /** The demo drive's virtual regeneration (the live drive's comes from the recorder). */
         val demoRegenKwh: Double = 0.0,
         val screen: Screen = Screen.HOME,
+        /** The real car's safety gate (P confirmed and no UX restriction), kept apart from the demo. */
+        val locked: Boolean = true,
     )
 
     private val recorder = app.recorder
@@ -160,19 +167,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { narrator.lastLine.collect { lastLine = it } }
     }
 
+    private fun isSafe(v: com.ifev.app.data.VehicleVisualState) = v.gear == com.ifev.app.data.GearState.PARK && !v.restricted
+
     val ui: StateFlow<UiState?> = combine(local, recorder.car, recorder.trips, recorder.settings, ticker) { l, car, trips, settings, now ->
         if (l.mode == Mode.DEMO) build(l, l.demoCar, l.demoTrips, l.demoSettings, l.demoNow ?: now)
         else build(l, car, trips, settings, now)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    /** True while the real car is out of P: nothing on screen may be switched then. */
-    private val liveDriving get() = recorder.car.value.parked == false
+    /** True unless the real car is confirmed in P without a screen restriction: nothing may be switched then. */
+    private val liveDriving get() = !isSafe(recorder.visual.value)
 
     fun setMode(mode: Mode) {
         if (liveDriving) return
         narrator.clearLastLine()
         driveJob?.cancel()
-        local.update { Local(mode = mode, demoSettings = it.demoSettings) }
+        local.update { Local(mode = mode, demoSettings = it.demoSettings, locked = it.locked) }
     }
 
     fun selectTab(tab: Tab) = local.update { it.copy(tab = tab) }
@@ -424,7 +433,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             },
             tripRegenKwh = if (l.mode == Mode.DEMO) l.demoRegenKwh else car.tripRegenKwh,
             // Driving always shows the virtual EV; the report is a parked-only page.
-            screen = if (car.driving) Screen.HOME else l.screen,
+            screen = if (car.driving || l.locked) Screen.HOME else l.screen,
+            locked = l.locked || car.driving,
             lastLine = lastLine?.takeIf { (_, at) -> System.currentTimeMillis() - at < LAST_LINE_MS }?.first,
         )
     }
@@ -488,10 +498,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val trace = recorder.lastDrive.value.takeIf { it.size >= 2 } ?: return
         replayJob?.cancel()
         replayJob = viewModelScope.launch {
+          try {
             val t0 = trace.first().tMs
             val started = android.os.SystemClock.elapsedRealtime()
             var prev: com.ifev.app.data.TracePoint? = null
             for (p in trace) {
+                if (!isSafe(recorder.visual.value)) break
                 // Played at twice the speed; the car is parked, so the view may animate.
                 val due = started + (p.tMs - t0) / REPLAY_SPEEDUP
                 val wait = due - android.os.SystemClock.elapsedRealtime()
@@ -506,7 +518,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 prev = p
                 replayVisual.value = VisualNow(
                     com.ifev.app.data.VehicleVisualState(
-                        speedMs = p.speedMs, speedAtMs = now, gear = p.gear, steeringDeg = p.steeringDeg, steeringAtMs = now,
+                        // The original receive time, moved onto the replay clock: a gap stays a gap.
+                        speedMs = p.speedMs, speedAtMs = p.speedAtMs?.let { now - (p.tMs - it) / REPLAY_SPEEDUP } ?: now, gear = p.gear, steeringDeg = p.steeringDeg, steeringAtMs = now,
                         brake = p.brake, turn = p.turn, climateOn = p.climateOn, restricted = false,
                         steeringAvailable = p.steeringDeg != null, brakeAvailable = p.brake != null, turnAvailable = true,
                     ),
@@ -514,19 +527,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             delay(1_000)
+          } finally {
             replayVisual.value = null
+          }
         }
+    }
+
+    private fun stopReplay() {
+        replayJob?.cancel()
+        replayJob = null
+        replayVisual.value = null
     }
 
     /** The top view's input, apart from the heavy report state: updated as often as the signals change. */
     val visual: StateFlow<VisualNow> = combine(local.map { it.mode }.distinctUntilChanged(), demoVisual, recorder.visual, replayVisual) { mode, demo, live, replay ->
         when {
+            // The real car's state wins over the demo and the replay the moment it is not safely parked.
+            !isSafe(live) -> VisualNow(live, liveRegen(live))
             mode == Mode.DEMO -> demo
-            // A replay stops the moment the car leaves P.
-            replay != null && live.gear == com.ifev.app.data.GearState.PARK -> replay
+            replay != null -> replay
             else -> VisualNow(live, liveRegen(live))
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, PARKED_DEMO)
+
+    // Declared after every flow it touches: init blocks run in declaration order.
+    init {
+        // The real car comes first: leaving P (or a screen restriction) stops the demo and any replay,
+        // switches to the live view and locks every touch target. Raw signals, not the demo's.
+        viewModelScope.launch {
+            recorder.visual.map { isSafe(it) }.distinctUntilChanged().collect { safe ->
+                val v = recorder.visual.value
+                android.util.Log.i("IfEV", "safety gate: safe=$safe gear=${v.gear} restricted=${v.restricted}")  // for the demo rehearsal log
+                if (!safe) {
+                    driveJob?.cancel()
+                    stopReplay()
+                    demoVisual.value = PARKED_DEMO
+                    local.update { if (it.mode == Mode.DEMO) Local(mode = Mode.LIVE, demoSettings = it.demoSettings, locked = true) else it.copy(screen = Screen.HOME, locked = true) }
+                } else {
+                    local.update { it.copy(locked = false) }
+                }
+            }
+        }
+    }
 
     private companion object {
         const val REPLAY_SPEEDUP = 2

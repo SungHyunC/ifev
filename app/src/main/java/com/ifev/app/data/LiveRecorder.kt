@@ -38,6 +38,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
+import kotlin.math.abs
 
 /** A distance and where it came from: the navigation's route, or straight line × road factor. */
 data class Km(val km: Double, val routed: Boolean)
@@ -129,6 +130,7 @@ class LiveRecorder(context: Context) {
 
     private val _car = MutableStateFlow(CarState())
     val car: StateFlow<CarState> = _car.asStateFlow()
+    private val tripPublication = TripSummaryPublicationGate()
     private val visualLock = Any()
     private var uxRestricted: Boolean? = null
     private val _visual = MutableStateFlow(VehicleVisualState(restricted = true))
@@ -292,6 +294,8 @@ class LiveRecorder(context: Context) {
             return
         }
         val now = System.currentTimeMillis()
+        val previousGear = _visual.value.gear
+        val previouslyParked = _car.value.parked
         when (e) {
             is CarSignal -> {
                 if (_car.value.vehicleStatus != "연결됨") _car.update { it.copy(vehicleStatus = "연결됨") }
@@ -404,13 +408,22 @@ class LiveRecorder(context: Context) {
             }
             is Speed -> recorder.onSpeed(e.metersPerSecond, now)
         }
-        _car.update {
-            it.copy(
+        // Every raw speed still reaches TripRecorder above, in event order. Only the report-facing
+        // summary is paced; visual speed and gear/parking updates keep their original cadence.
+        if (tripPublication.shouldPublish(
                 tripKm = recorder.currentKm,
                 tripStartAt = recorder.currentStartAt,
-                tripClimateShare = recorder.currentClimateShare(now),
-                tripRegenKwh = recorder.currentRegenKwh,
-            )
+                elapsedMs = SystemClock.elapsedRealtime(),
+                force = previousGear != _visual.value.gear || previouslyParked != _car.value.parked,
+            )) {
+            _car.update {
+                it.copy(
+                    tripKm = recorder.currentKm,
+                    tripStartAt = recorder.currentStartAt,
+                    tripClimateShare = recorder.currentClimateShare(now),
+                    tripRegenKwh = recorder.currentRegenKwh,
+                )
+            }
         }
         if (recorder.driving && now - lastSnapshotAt >= SNAPSHOT_EVERY_MS) {
             lastSnapshotAt = now
@@ -528,6 +541,27 @@ class LiveRecorder(context: Context) {
         }
 
         fun monthsSinceModelYear(year: Int, today: LocalDate = LocalDate.now(Trip.KST)): Int = monthsOnRoad(year, today)
+    }
+}
+
+/** Paces trip aggregates only; the engine, persistence and immediate car signals do not use this. */
+internal class TripSummaryPublicationGate(
+    private val distanceStepKm: Double = 0.05,
+    private val intervalMs: Long = 1_000L,
+) {
+    private var lastAtMs: Long? = null
+    private var lastKm = 0.0
+    private var lastStartAt: Long? = null
+
+    fun shouldPublish(tripKm: Double, tripStartAt: Long?, elapsedMs: Long, force: Boolean = false): Boolean {
+        val last = lastAtMs
+        if (!force && last != null && tripStartAt == lastStartAt &&
+            abs(tripKm - lastKm) < distanceStepKm && elapsedMs - last < intervalMs
+        ) return false
+        lastAtMs = elapsedMs
+        lastKm = tripKm
+        lastStartAt = tripStartAt
+        return true
     }
 }
 

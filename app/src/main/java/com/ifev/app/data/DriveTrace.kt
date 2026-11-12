@@ -9,6 +9,8 @@ data class TracePoint(
     val turn: TurnState,
     val gear: GearState,
     val climateOn: Boolean?,
+    /** Original speed receipt time in elapsed realtime; unchanged by the trace sampling clock. */
+    val speedAtMs: Long? = null,
 )
 
 /**
@@ -43,7 +45,10 @@ class DriveTrace(
         if (state.gear !in DRIVING_GEARS) return false
         while (points.isNotEmpty() && tMs - points.first().tMs >= maxDurationMs) points.removeFirst()
         if (points.lastOrNull()?.let { tMs - it.tMs < sampleIntervalMs } == true) return false
-        points.addLast(TracePoint(tMs, state.speedMs, state.steeringDeg, state.brake, state.turn, state.gear, state.climateOn))
+        points.addLast(TracePoint(
+            tMs, state.speedMs, state.steeringDeg, state.brake, state.turn, state.gear,
+            state.climateOn, speedAtMs = state.speedAtMs,
+        ))
         while (points.size > maxPoints) points.removeFirst()
         return false
     }

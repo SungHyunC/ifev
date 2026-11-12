@@ -80,7 +80,7 @@ fun MainScreen(ui: UiState, visual: MainViewModel.VisualNow, actions: Actions, c
         TopBar(ui, actions)
         Spacer(Modifier.height(16.dp))
         // Driving always shows the virtual EV, with nothing to press; the report pages are parked-only.
-        if (ui.screen == MainViewModel.Screen.REPORT && !ui.car.driving) {
+        if (ui.screen == MainViewModel.Screen.REPORT && !ui.locked) {
             ReportPages(ui, actions)
         } else {
             HomeScreen(ui, visual, actions, canReplay, replaying)
@@ -130,7 +130,7 @@ private fun TopBar(ui: UiState, actions: Actions) {
             connected || ui.mode == Mode.DEMO,
         )
         Spacer(Modifier.weight(1f))
-        if (!ui.car.driving) {
+        if (!ui.locked) {
             PleosButton(if (ui.settings.voiceOn) "음성 켜짐" else "음성 꺼짐", ui.settings.voiceOn, actions.onVoice)
             Spacer(Modifier.width(16.dp))
             Segmented(listOf("실시간", "시연"), if (ui.mode == Mode.LIVE) 0 else 1, { actions.onMode(if (it == 0) Mode.LIVE else Mode.DEMO) })

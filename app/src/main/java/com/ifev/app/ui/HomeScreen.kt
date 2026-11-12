@@ -41,7 +41,9 @@ import kotlin.math.roundToInt
 fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, actions: Actions, canReplay: Boolean = false, replaying: Boolean = false) {
     val c = LocalPleosColors.current
     val driving = ui.car.driving
-    if (ui.mode == Mode.DEMO && !driving) {
+    // Touch targets only when the real car is safely parked (and no demo commute is playing).
+    val locked = ui.locked
+    if (ui.mode == Mode.DEMO && !locked) {
         DemoBar(ui, actions)
         Spacer(Modifier.height(16.dp))
     }
@@ -67,7 +69,7 @@ fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, action
                     restricted = v.restricted,
                 ),
                 modifier = Modifier.fillMaxSize(),
-                steering = if (ui.mode == Mode.DEMO) SteeringConfig() else LIVE_STEERING,
+                steering = if (ui.mode == Mode.DEMO) SteeringConfig() else liveSteering,
             )
             Column(Modifier.padding(28.dp)) {
                 Text("${ui.model.ifItWere}", style = PleosType.bodyStrong, color = c.textPrimary)
@@ -110,7 +112,7 @@ fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, action
                     "%,d km · ".format(r.distanceKm.roundToInt()) + if (r.stops > 0) "급속 ${r.stops}번" else "충전 없이")
             }
             Spacer(Modifier.weight(1f))
-            if (!driving) {
+            if (!locked) {
                 val verdict = ui.report?.verdict ?: ui.prelim.verdict
                 Card(Modifier.fillMaxWidth()) {
                     Label(if (ui.report != null) "기록한 ${ui.report.days}일 판정" else "설치 직후 예비 판정")
@@ -165,8 +167,12 @@ private fun climateCaption(ui: UiState): String? {
 
 /**
  * How this car's steering value is read. The Pleos SDK documents a front road-wheel angle, left
- * negative; on the emulator (2026-11-12) the Virtual Console's steering −150° arrived through the SDK as
- * +150: a hand-wheel range with the sign reversed. So: hand wheel, 15:1, mirrored (−150 → −10° left).
- * To be confirmed on a real car; this is the one place to change.
+ * negative, and real cars get exactly that. The emulator does not: its Virtual Console's −150° arrived
+ * through the SDK as +150 (2026-11-12), a hand-wheel range with the sign reversed. So on the emulator
+ * only: hand wheel, 15:1, mirrored (−150 → −10° left).
  */
-private val LIVE_STEERING = SteeringConfig(kind = SteeringConfig.Kind.HAND_WHEEL, sign = -1, ratio = 15.0)
+private val isEmulator: Boolean = android.os.Build.HARDWARE == "ranchu" || android.os.Build.HARDWARE == "goldfish" ||
+    android.os.Build.PRODUCT.contains("avd") || android.os.Build.FINGERPRINT.contains("emulator")
+
+private val liveSteering: SteeringConfig =
+    if (isEmulator) SteeringConfig(kind = SteeringConfig.Kind.HAND_WHEEL, sign = -1, ratio = 15.0) else SteeringConfig()

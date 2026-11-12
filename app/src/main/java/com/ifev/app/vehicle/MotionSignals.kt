@@ -14,9 +14,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.coroutines.resume
 
 data class MotionState(
     val steeringDeg: Double? = null,
@@ -52,9 +49,23 @@ internal class MotionSignals(private val vehicle: Vehicle, private val log: (Str
             runCatching(call).onFailure { log("$what 실패: ${it.message}"); unavailable() }
         }
 
-        val steering = runCatching { vehicle.getSteeringWheel() }.onFailure { log("조향 서비스 없음: ${it.message}") }.getOrNull()
-        val brake = runCatching { vehicle.getBrake() }.onFailure { log("브레이크 서비스 없음: ${it.message}") }.getOrNull()
-        val turn = runCatching { vehicle.getTurnSignal() }.onFailure { log("방향지시등 서비스 없음: ${it.message}") }.getOrNull()
+        // Each attempt obtains the service again, so a transient connection failure can recover.
+        // Install removal before registration: a throwing SDK call may still have added a listener.
+        var removeSteering: () -> Unit = {}
+        var removeBrake: () -> Unit = {}
+        var removeTurn: () -> Unit = {}
+        fun clearSteering() = synchronized(lock) {
+            runCatching(removeSteering)
+            removeSteering = {}
+        }
+        fun clearBrake() = synchronized(lock) {
+            runCatching(removeBrake)
+            removeBrake = {}
+        }
+        fun clearTurn() = synchronized(lock) {
+            runCatching(removeTurn)
+            removeTurn = {}
+        }
         val steeringListener = object : SteeringWheelAngleListener {
             override fun onSteeringWheelAngleUpdated(angle: Float?) {
                 val at = SystemClock.elapsedRealtime()
@@ -81,46 +92,76 @@ internal class MotionSignals(private val vehicle: Vehicle, private val log: (Str
             override fun onFailed(e: Exception) = failed("방향지시등", ::turnFailed)(e)
         }
 
+        fun subscribe(
+            what: String,
+            unavailable: () -> Unit,
+            cleanup: () -> Unit,
+            attempt: suspend () -> MotionCapability,
+        ) = launch {
+            val result = retryMotionSubscription(
+                attempt = attempt,
+                cleanup = cleanup,
+                onFailure = failed("$what 구독", unavailable),
+                onRetry = { retry ->
+                    unavailable()
+                    log("$what 지원 확인/구독 재시도 $retry/3: 5초 후")
+                },
+            )
+            if (result != MotionCapability.READABLE) unavailable()
+        }
+
         trySend(state)
-        launch {
-            if (steering != null && readable("조향") { done, fail ->
-                    steering.checkSteeringWheelAngleCapabilities({ config, _ -> done(config) }, fail)
-                }) synchronized(lock) {
+        subscribe("조향", ::steeringFailed, ::clearSteering) {
+            val steering = vehicle.getSteeringWheel()
+            val capability = readable("조향") { done, fail ->
+                steering.checkSteeringWheelAngleCapabilities({ config, _ -> done(config) }, fail)
+            }
+            if (capability == MotionCapability.READABLE) synchronized(lock) {
                 if (!closed) {
-                    guard("조향 구독", ::steeringFailed) { steering.registerSteeringWheelAngle(steeringListener) }
+                    removeSteering = { steering.unregisterSteeringWheelAngle(steeringListener) }
+                    steering.registerSteeringWheelAngle(steeringListener)
                     guard("조향 조회", ::steeringFailed) {
                         steering.getCurrentSteeringWheelAngle(steeringListener::onSteeringWheelAngleUpdated, failed("조향 조회", ::steeringFailed))
                     }
                 }
             }
+            capability
         }
-        launch {
-            if (brake != null && readable("브레이크", brake::checkBrakePedalStatusCapabilities)) synchronized(lock) {
+        subscribe("브레이크", ::brakeFailed, ::clearBrake) {
+            val brake = vehicle.getBrake()
+            val capability = readable("브레이크", brake::checkBrakePedalStatusCapabilities)
+            if (capability == MotionCapability.READABLE) synchronized(lock) {
                 if (!closed) {
-                    guard("브레이크 구독", ::brakeFailed) { brake.registerBrakePedalStatus(brakeListener) }
+                    removeBrake = { brake.unregisterBrakePedalStatus(brakeListener) }
+                    brake.registerBrakePedalStatus(brakeListener)
                     guard("브레이크 조회", ::brakeFailed) {
                         brake.getCurrentBrakePedalStatus(brakeListener::onBrakePedalStatusUpdated, failed("브레이크 조회", ::brakeFailed))
                     }
                 }
             }
+            capability
         }
-        launch {
-            if (turn != null && readable("방향지시등", turn::checkTurnSignalStateCapabilities)) synchronized(lock) {
+        subscribe("방향지시등", ::turnFailed, ::clearTurn) {
+            val turn = vehicle.getTurnSignal()
+            val capability = readable("방향지시등", turn::checkTurnSignalStateCapabilities)
+            if (capability == MotionCapability.READABLE) synchronized(lock) {
                 if (!closed) {
-                    guard("방향지시등 구독", ::turnFailed) { turn.registerTurnSignalState(turnListener) }
+                    removeTurn = { turn.unregisterTurnSignalState(turnListener) }
+                    turn.registerTurnSignalState(turnListener)
                     guard("방향지시등 조회", ::turnFailed) {
                         turn.getCurrentTurnSignalState(turnListener::onTurnSignalStateUpdated, failed("방향지시등 조회", ::turnFailed))
                     }
                 }
             }
+            capability
         }
         awaitClose {
             synchronized(lock) {
                 closed = true
                 // Also remove partially registered listeners after a synchronous SDK failure.
-                runCatching { steering?.unregisterSteeringWheelAngle(steeringListener) }
-                runCatching { brake?.unregisterBrakePedalStatus(brakeListener) }
-                runCatching { turn?.unregisterTurnSignalState(turnListener) }
+                clearSteering()
+                clearBrake()
+                clearTurn()
             }
         }
     }.conflate()
@@ -128,15 +169,10 @@ internal class MotionSignals(private val vehicle: Vehicle, private val log: (Str
     private suspend fun readable(
         what: String,
         check: (onComplete: (CapabilityConfig) -> Unit, onFailed: (Exception) -> Unit) -> Unit,
-    ): Boolean = withTimeoutOrNull(5_000) {
-        suspendCancellableCoroutine { cont ->
-            fun finish(value: Boolean) { if (cont.isActive) cont.resume(value) }
-            runCatching {
-                check({ finish(it.accessType == AccessType.READ || it.accessType == AccessType.READ_WRITE) }, {
-                    log("$what 지원 확인 실패: ${it.message}")
-                    finish(false)
-                })
-            }.onFailure { log("$what 지원 확인 실패: ${it.message}"); finish(false) }
-        }
-    } ?: false
+    ): MotionCapability = awaitMotionCapability(
+        onFailure = { log("$what 지원 확인 실패: ${it.message}") },
+        onTimeout = { log("$what 지원 확인 시간 초과") },
+    ) { done, fail ->
+        check({ done(it.accessType == AccessType.READ || it.accessType == AccessType.READ_WRITE) }, fail)
+    }
 }
