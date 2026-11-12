@@ -31,6 +31,11 @@ enum class Verdict(val title: String) {
     CONDITIONAL("급속 충전을 생활에 넣으면 가능해요"),
     HYBRID_BETTER("지금 생활엔 하이브리드가 더 맞아요"),
     UNKNOWN("아직 판단할 수 없어요"),
+    ;
+
+    /** The headline for the charging the replay assumed: the office charger names itself. */
+    fun titleFor(plan: ChargingPlan): String =
+        if (this == GOOD && !plan.homeCharging && plan.workCharging) "회사 주차장 충전이면 충분해요" else title
 }
 
 enum class KmSource { ODOMETER, COMMUTE, NONE }
@@ -62,6 +67,8 @@ data class PrelimResult(
     val assumptions: List<String>,
     /** Answers or data still missing; the screen asks for these. */
     val missing: List<String>,
+    /** Fuel saved a year by a hybrid on the same distance instead (no charging at all), when cheaper. */
+    val annualHybridSavingWon: Double? = null,
 ) {
     val annualSavingLow: Double? get() = if (annualFuelWon != null && annualEvWonHigh != null) annualFuelWon - annualEvWonHigh else null
     val annualSavingHigh: Double? get() = if (annualFuelWon != null && annualEvWonLow != null) annualFuelWon - annualEvWonLow else null
@@ -168,6 +175,7 @@ object Preliminary {
             verdict = verdict,
             assumptions = assumptions,
             missing = missing,
+            annualHybridSavingWon = annualKm?.let { km -> Hybrid.saving(km, input.fuelKmPerL, prices) },
         )
     }
 

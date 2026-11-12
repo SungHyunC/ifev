@@ -18,7 +18,9 @@ import com.ifev.app.vehicle.Voice
 
 class IfEvApp : Application() {
     val recorder by lazy { LiveRecorder(this) }
-    val narrator by lazy { Narrator(recorder, Voice(this) { android.util.Log.d("IfEV", it) }) }
+    /** Held here so the service can release it; the narrator starts it again before speaking. */
+    val voice by lazy { Voice(this) { android.util.Log.d("IfEV", it) } }
+    val narrator by lazy { Narrator(recorder, voice) }
 }
 
 val Context.recorder: LiveRecorder get() = (applicationContext as IfEvApp).recorder
@@ -52,6 +54,17 @@ class RecorderService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
+    /**
+     * Only reached when the service is stopped while the process lives on (a kill skips it). Release
+     * the car connections and the speech engines; START_STICKY or the next app launch runs onCreate,
+     * which starts the recorder again, and an open trip resumes from its snapshot.
+     */
+    override fun onDestroy() {
+        runCatching { recorder.stop() }
+        runCatching { (applicationContext as IfEvApp).voice.stop() }
+        super.onDestroy()
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 

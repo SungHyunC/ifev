@@ -19,6 +19,9 @@ import com.ifev.app.engine.Moments
 import com.ifev.app.engine.resolveFuelEconomy
 import com.ifev.app.engine.FuelCarCatalog
 import java.time.Instant
+import com.ifev.app.engine.Place
+import com.ifev.app.engine.SeoulClimate
+import kotlin.math.roundToInt
 
 /**
  * Turns the recorder's moments into one spoken line each, so the imagined EV is felt even while the
@@ -63,19 +66,36 @@ class Narrator(private val recorder: LiveRecorder, private val voice: Voice) {
 
     private fun lineFor(m: Moment, settings: Settings, trips: List<Trip>, car: CarState): String? {
         val model = EvCatalog.byId(settings.modelId)
-        val plan = ChargingPlan(homeCharging = settings.homeCharging ?: true)
+        val plan = settings.plan()
         val now = System.currentTimeMillis()
         return when (m) {
             is Moment.RouteSet -> {
-                val soc = BatterySim.run(model, trips, plan, nowMs = car.tripStartAt ?: now).endSoc.takeIf { trips.isNotEmpty() } ?: plan.startSoc
+                val start = BatterySim.run(model, trips, plan, nowMs = car.tripStartAt ?: now).endSoc.takeIf { trips.isNotEmpty() } ?: plan.startSoc
+                // A destination set mid-drive starts from what this drive has used so far, as the screen does.
+                val soc = if (car.driving && car.tripKm > 0) {
+                    val hours = ((now - (car.tripStartAt ?: now)) / 3_600_000.0).coerceAtLeast(1.0 / 60)
+                    val speed = (car.tripKm / hours).coerceIn(5.0, 120.0)
+                    val used = car.tripKm * EnergyModel.kwhPerKm(model, SeoulClimate.meanC(month(now)), speed, car.tripClimateShare)
+                    RoutePlanner.drain(start, used, model.batteryKwh, plan).soc
+                } else start
                 val p = RoutePlanner.preview(model, soc, m.route.remainKm, m.route.remainMinutes, month(now), plan)
                 Lines.route(model, m.route.name, p)
             }
             is Moment.Departed -> {
                 if (trips.isEmpty()) return null
-                val before = BatterySim.run(model, trips, plan, nowMs = trips.maxOf { it.endAt }).endSoc
+                val last = trips.maxBy { it.endAt }
+                val before = BatterySim.run(model, trips, plan, nowMs = last.endAt).endSoc
                 val after = BatterySim.run(model, trips, plan, nowMs = m.atMs).endSoc
-                if (after > before + 0.01) Lines.departedAfterCharging(model, after) else null
+                when {
+                    after <= before + 0.01 -> null
+                    last.endPlace == Place.HOME && plan.homeCharging -> Lines.departedAfterCharging(model, after)
+                    else -> {
+                        val parked = ((m.atMs - last.endAt) / 60_000.0).roundToInt()
+                        val charge = ((after - before) * model.batteryKwh / plan.fastKw * 60 + plan.fastOverheadMin).roundToInt()
+                        if (last.endPlace == Place.OFFICE && plan.workCharging) Lines.departedAfterCharging(model, after, "회사 주차장에서")
+                        else Lines.restStop(model, parked, charge, after)
+                    }
+                }
             }
             is Moment.Refueled -> {
                 val since = trips.filter { t -> m.previousRefuelAt == null || t.startAt >= m.previousRefuelAt }

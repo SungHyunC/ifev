@@ -115,4 +115,7 @@ object DemoScenario {
 
     /** Real duration the played-back commute stands for. */
     const val DRIVE_REAL_MINUTES = 45.0
+
+    /** Traffic lights on the commute: one stop about every 0.8 km. */
+    const val STOP_EVERY_KM = 0.8
 }

@@ -1,0 +1,24 @@
+{
+  "_note": "지어낸 형식 견본(synthetic). 실제 사람의 기록이 아니다. 예전 구글 테이크아웃 Semantic Location History 월별 파일(timelineObjects) 구조만 흉내 낸다.",
+  "timelineObjects": [
+    {"placeVisit": {"location": {"latitudeE7": 375000000, "longitudeE7": 1270000000, "semanticType": "TYPE_HOME"},
+                    "duration": {"startTimestamp": "2022-03-07T13:00:00Z", "endTimestamp": "2022-03-07T23:40:00Z"}}},
+    {"activitySegment": {"startLocation": {"latitudeE7": 375000000, "longitudeE7": 1270000000},
+                         "endLocation": {"latitudeE7": 375600000, "longitudeE7": 1269200000},
+                         "duration": {"startTimestamp": "2022-03-07T23:40:00Z", "endTimestamp": "2022-03-08T00:25:00Z"},
+                         "distance": 14300, "activityType": "IN_PASSENGER_VEHICLE"}},
+    {"placeVisit": {"location": {"latitudeE7": 375600000, "longitudeE7": 1269200000, "semanticType": "TYPE_WORK"},
+                    "duration": {"startTimestamp": "2022-03-08T00:25:00Z", "endTimestamp": "2022-03-08T09:30:00Z"}}},
+    {"activitySegment": {"startLocation": {"latitudeE7": 375600000, "longitudeE7": 1269200000},
+                         "endLocation": {"latitudeE7": 375000000, "longitudeE7": 1270000000},
+                         "duration": {"startTimestampMs": "1646731800000", "endTimestampMs": "1646734500000"},
+                         "distance": 15000, "activityType": "IN_PASSENGER_VEHICLE"}},
+    {"activitySegment": {"startLocation": {"latitudeE7": 375000000, "longitudeE7": 1270000000},
+                         "endLocation": {"latitudeE7": 375050000, "longitudeE7": 1270040000},
+                         "duration": {"startTimestamp": "2022-03-08T11:00:00Z", "endTimestamp": "2022-03-08T11:15:00Z"},
+                         "distance": 900, "activityType": "WALKING"}},
+    {"activitySegment": {"startLocation": {"latitudeE7": 375000000, "longitudeE7": 1270000000},
+                         "duration": {"startTimestamp": "2022-03-09T01:00:00Z", "endTimestamp": "2022-03-09T01:30:00Z"},
+                         "distance": 21000, "activityType": "IN_PASSENGER_VEHICLE"}}
+  ]
+}

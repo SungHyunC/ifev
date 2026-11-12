@@ -1,0 +1,28 @@
+{
+  "_note": "지어낸 형식 견본(synthetic). 실제 사람의 기록이 아니다. 휴대폰 구글 지도 Timeline.json의 semanticSegments 구조만 흉내 낸다.",
+  "semanticSegments": [
+    {"startTime": "2026-10-05T00:00:00.000+09:00", "endTime": "2026-10-05T07:50:00.000+09:00",
+     "visit": {"topCandidate": {"semanticType": "HOME", "placeLocation": {"latLng": "37.5000000°, 127.0000000°"}}}},
+    {"startTime": "2026-10-05T07:50:00.000+09:00", "endTime": "2026-10-05T08:30:00.000+09:00",
+     "activity": {"start": {"latLng": "37.5000000°, 127.0000000°"}, "end": {"latLng": "37.5600000°, 126.9200000°"},
+                  "distanceMeters": 14200.0, "topCandidate": {"type": "IN_PASSENGER_VEHICLE", "probability": 0.9}}},
+    {"startTime": "2026-10-05T08:30:00.000+09:00", "endTime": "2026-10-05T18:30:00.000+09:00",
+     "visit": {"topCandidate": {"semanticType": "INFERRED_WORK", "placeLocation": {"latLng": "37.5600000°, 126.9200000°"}}}},
+    {"startTime": "2026-10-05T12:10:00.000+09:00", "endTime": "2026-10-05T12:20:00.000+09:00",
+     "activity": {"start": {"latLng": "37.5600000°, 126.9200000°"}, "end": {"latLng": "37.5610000°, 126.9230000°"},
+                  "distanceMeters": 600.0, "topCandidate": {"type": "WALKING"}}},
+    {"startTime": "2026-10-05T18:30:00.000+09:00", "endTime": "2026-10-05T19:15:00.000+09:00",
+     "activity": {"start": {"latLng": "37.5600000°, 126.9200000°"}, "end": {"latLng": "37.5000000°, 127.0000000°"},
+                  "distanceMeters": 15100.0, "topCandidate": {"type": "in passenger vehicle"}}},
+    {"startTime": "2026-10-06T10:00:00.000+09:00", "endTime": "2026-10-06T10:20:00.000+09:00",
+     "activity": {"start": {"latLng": "37.5000000°, 127.0000000°"}, "end": {"latLng": "37.4800000°, 127.0500000°"},
+                  "topCandidate": {"type": "IN_PASSENGER_VEHICLE"}}},
+    {"startTime": "2026-10-06T10:20:00.000+09:00", "endTime": "2026-10-06T11:00:00.000+09:00",
+     "visit": {"topCandidate": {"semanticType": "UNKNOWN", "placeLocation": {"latLng": "37.4800000°, 127.0500000°"}}}},
+    {"startTime": "2026-10-06T11:00:00.000+09:00", "endTime": "2026-10-06T11:25:00.000+09:00",
+     "activity": {"start": {"latLng": "37.4800000°, 127.0500000°"}, "end": {"latLng": "37.5000000°, 127.0000000°"},
+                  "distanceMeters": 6900.0, "topCandidate": {"type": "IN_BUS"}}},
+    {"startTime": "2026-10-06T00:00:00.000+09:00", "endTime": "2026-10-06T00:30:00.000+09:00",
+     "timelinePath": [{"point": "37.5000000°, 127.0000000°", "time": "2026-10-06T00:10:00.000+09:00"}]}
+  ]
+}

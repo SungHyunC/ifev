@@ -1,5 +1,6 @@
 package com.ifev.app.data
 
+import com.ifev.app.engine.ChargingPlan
 import android.content.Context
 import com.ifev.app.engine.DistanceSource
 import com.ifev.app.engine.Place
@@ -21,7 +22,12 @@ data class Settings(
     val voiceOn: Boolean = true,
     /** When the last fill-up was seen (fuel level jumping up), for "since the last refuel". */
     val lastRefuelAt: Long? = null,
-)
+    /** A slow charger at the office car park: asked once the car has stood there for hours. */
+    val workCharging: Boolean? = null,
+) {
+    /** The charging routine the replay assumes for these answers. */
+    fun plan(): ChargingPlan = ChargingPlan(homeCharging = homeCharging ?: true, workCharging = workCharging == true)
+}
 
 /**
  * Everything stays on the car: settings in SharedPreferences, trips in a JSON file in app storage.
@@ -41,6 +47,7 @@ class Store(context: Context) {
         myCarId = prefs.getString(KEY_MY_CAR, null),
         voiceOn = prefs.getBoolean(KEY_VOICE, true),
         lastRefuelAt = prefs.getLong(KEY_REFUEL, -1).takeIf { it > 0 },
+        workCharging = when (prefs.getInt(KEY_WORK, -1)) { 1 -> true; 0 -> false; else -> null },
     )
 
     fun save(s: Settings) {
@@ -52,6 +59,7 @@ class Store(context: Context) {
             .putString(KEY_MY_CAR, s.myCarId)
             .putBoolean(KEY_VOICE, s.voiceOn)
             .putLong(KEY_REFUEL, s.lastRefuelAt ?: -1)
+            .putInt(KEY_WORK, when (s.workCharging) { true -> 1; false -> 0; null -> -1 })
             .apply()
     }
 
@@ -86,7 +94,7 @@ class Store(context: Context) {
     fun saveOpenTrip(s: TripRecorder.Snapshot) {
         val json = JSONObject()
             .put("s", s.startAt).put("o", s.startOdometer ?: JSONObject.NULL).put("from", s.startPlace.name)
-            .put("path", s.pathKm).put("speed", s.speedKm).put("cms", s.climateMs).put("con", s.climateOn).put("at", s.savedAt)
+            .put("path", s.pathKm).put("speed", s.speedKm).put("cms", s.climateMs).put("con", s.climateOn).put("at", s.savedAt).put("rg", s.regenKwh)
         writeAtomically(openFile, json.toString())
     }
 
@@ -104,6 +112,7 @@ class Store(context: Context) {
                 climateMs = j.getLong("cms"),
                 climateOn = j.getBoolean("con"),
                 savedAt = j.getLong("at"),
+                regenKwh = j.optDouble("rg", 0.0),
             )
         }.getOrNull()
     }
@@ -129,6 +138,7 @@ class Store(context: Context) {
         .put("f", fuelKmPerL ?: JSONObject.NULL)
         .put("ds", distanceSource.name)
         .put("ev", evKwhUsed ?: JSONObject.NULL)
+        .put("rg", regenKwh ?: JSONObject.NULL)
 
     private fun JSONObject.toTrip() = Trip(
         startAt = getLong("s"),
@@ -141,6 +151,7 @@ class Store(context: Context) {
         fuelKmPerL = if (isNull("f")) null else getDouble("f"),
         distanceSource = optString("ds").let { s -> DistanceSource.entries.firstOrNull { it.name == s } ?: DistanceSource.UNKNOWN },
         evKwhUsed = if (has("ev") && !isNull("ev")) getDouble("ev") else null,
+        regenKwh = if (has("rg") && !isNull("rg")) getDouble("rg") else null,
     )
 
     private companion object {
@@ -151,5 +162,6 @@ class Store(context: Context) {
         const val KEY_MY_CAR = "myCar"
         const val KEY_VOICE = "voice"
         const val KEY_REFUEL = "lastRefuelAt"
+        const val KEY_WORK = "workCharging"
     }
 }

@@ -21,10 +21,29 @@ object Lines {
 
     fun parked(model: EvModel, trip: Trip, kwh: Double, won: Double, homeCharging: Boolean, socAfter: Double): String =
         "방금 ${km(trip.distanceKm)}. ${model.ifItWere} 전기 ${"%.1f".format(kwh)}킬로와트시, " +
-            "${if (homeCharging) "집 충전으로" else "급속 충전으로"} 약 ${won.roundToInt()}원이에요. 가상 배터리는 ${pct(socAfter)} 남았어요."
+            "${if (homeCharging) "집 충전으로" else "급속 충전으로"} 약 ${won.roundToInt()}원이에요. " +
+            regenClause(trip.regenKwh, kwh) +
+            "가상 배터리는 ${pct(socAfter)} 남았어요."
 
-    fun departedAfterCharging(model: EvModel, soc: Double): String =
-        "${model.ifItWere} 세워 둔 사이 집에서 ${pct(soc)}까지 충전하고 출발해요."
+    /** "그중 0.4는 브레이크 대신 모터가 되찾은 몫이에요." when it is worth saying. */
+    private fun regenClause(regen: Double?, kwh: Double): String =
+        if (regen != null && regen >= 0.05 && regen < kwh) "그중 ${"%.1f".format(regen)}은 감속할 때 모터가 되찾은 몫이에요. " else ""
+
+    /**
+     * Leaving after a stop away from home (a rest area, the destination) during which the replay put
+     * a fast charge: the charge happened while the driver was resting anyway.
+     */
+    fun restStop(model: EvModel, parkedMinutes: Int, chargeMinutes: Int, soc: Double): String {
+        val extra = (chargeMinutes - parkedMinutes).coerceAtLeast(0)
+        if (parkedMinutes > 120) {
+            return "${model.ifItWere} 세워 둔 사이 급속으로 ${pct(soc)}까지 채웠다고 셌어요. 충전 ${chargeMinutes}분은 원래 세워 두던 시간이에요."
+        }
+        return "방금 ${parkedMinutes}분 쉬셨죠. ${model.ifItWere} 그 사이 급속으로 ${pct(soc)}까지 채웠다고 셌어요. " +
+            if (extra > 0) "충전이 ${extra}분 더 걸려서 그만큼은 기다린 셈이에요." else "따로 기다린 시간은 없어요."
+    }
+
+    fun departedAfterCharging(model: EvModel, soc: Double, where: String = "집에서"): String =
+        "${model.ifItWere} 세워 둔 사이 $where ${pct(soc)}까지 충전하고 출발해요."
 
     fun refueled(model: EvModel, c: RefuelCompare, homeCharging: Boolean): String =
         "방금 주유하셨네요. 지난 주유 뒤로 달린 ${km(c.km)}에 기름값이 약 ${won(c.fuelWon)} 들었어요. " +

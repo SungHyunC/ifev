@@ -5,7 +5,11 @@ import android.car.VehiclePropertyIds
 import android.car.hardware.CarPropertyValue
 import android.car.hardware.property.CarPropertyManager
 import android.content.Context
+import android.content.pm.PackageManager
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
@@ -14,7 +18,8 @@ import kotlinx.coroutines.flow.callbackFlow
  * to align with AAOS when the same function exists there, and its Gear API is deprecated with "use the
  * Google GEAR_SELECTION property"; likewise its EV battery capacity getter points to
  * INFO_EV_BATTERY_CAPACITY. Each property is subscribed on its own, so one the car refuses does not
- * stop the others.
+ * stop the others. A property refused while its runtime permission is missing is tried again once
+ * the permission is granted (the app asks for it after the recorder has already started).
  *
  * - GEAR_SELECTION: android.car.permission.CAR_POWERTRAIN
  * - INFO_EV_BATTERY_CAPACITY (Wh): android.car.permission.CAR_INFO
@@ -55,24 +60,53 @@ class AaosSignals(context: Context, private val log: (String) -> Unit) {
                 log("AAOS 속성 오류: $propertyId")
             }
         }
-        val subscribed = mutableListOf<Int>()
-        for (id in listOf(VehiclePropertyIds.GEAR_SELECTION, VehiclePropertyIds.EV_BATTERY_LEVEL)) {
-            val ok = runCatching { manager.registerCallback(callback, id, CarPropertyManager.SENSOR_RATE_ONCHANGE) }
+        fun subscribe(id: Int): Boolean =
+            runCatching { manager.registerCallback(callback, id, CarPropertyManager.SENSOR_RATE_ONCHANGE) }
                 .onFailure { log("AAOS 속성 $id 구독 실패: ${it.message}") }.getOrDefault(false)
-            if (ok) subscribed += id
+        val subscribed = mutableListOf<Int>()
+        /** Refused while the permission was missing: worth another try once it is granted. */
+        val waitingForPermission = mutableListOf<Int>()
+        for (id in PERMISSIONS.keys) {
+            when {
+                subscribe(id) -> subscribed += id
+                !granted(id) -> waitingForPermission += id
+            }
         }
         // A static property: read once.
         runCatching { manager.getProperty(Float::class.javaObjectType, VehiclePropertyIds.INFO_EV_BATTERY_CAPACITY, 0) }
             .onSuccess { v -> v?.value?.let { wh -> if (wh > 0) trySend(Signal.EvCapacityKwh(wh / 1000.0)) } }
             .onFailure { log("배터리 용량 없음(연료차일 수 있음): ${it.message}") }
         if (subscribed.isEmpty()) log("AAOS 기어·배터리 구독 없음, Pleos SDK 기어로 대신함")
+        if (waitingForPermission.isNotEmpty()) launch {
+            // checkSelfPermission is cheap; register only once the grant is there, and try each once.
+            while (isActive && waitingForPermission.isNotEmpty()) {
+                delay(PERMISSION_RETRY_MS)
+                val now = waitingForPermission.filter(::granted)
+                for (id in now) {
+                    waitingForPermission -= id
+                    if (subscribe(id)) {
+                        subscribed += id
+                        log("AAOS 속성 $id 권한 허용 후 구독")
+                    }
+                }
+            }
+        }
         awaitClose {
             runCatching { manager.unregisterCallback(callback) }
             car.disconnect()
         }
     }
 
+    private fun granted(id: Int): Boolean =
+        PERMISSIONS[id]?.let { app.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED } ?: true
+
     private companion object {
+        /** Subscribed properties and the permission each needs. */
+        val PERMISSIONS = linkedMapOf(
+            VehiclePropertyIds.GEAR_SELECTION to "android.car.permission.CAR_POWERTRAIN",
+            VehiclePropertyIds.EV_BATTERY_LEVEL to "android.car.permission.CAR_ENERGY",
+        )
+        const val PERMISSION_RETRY_MS = 5_000L
         /** android.car.VehicleGear values. */
         const val GEAR_UNKNOWN = 0
         const val GEAR_PARK = 4

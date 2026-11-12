@@ -12,6 +12,7 @@ import com.ifev.app.vehicle.CarSignal
 import com.ifev.app.vehicle.NaviGateway
 import com.ifev.app.vehicle.NaviPlace
 import com.ifev.app.vehicle.AaosSignals
+import com.ifev.app.vehicle.ArrivalUnit
 import com.ifev.app.vehicle.NaviSignal
 import com.ifev.app.vehicle.SpeedSource
 import com.ifev.app.vehicle.VehicleGateway
@@ -72,6 +73,8 @@ data class CarState(
     val tripKm: Double = 0.0,
     val tripStartAt: Long? = null,
     val tripClimateShare: Double = 0.0,
+    /** Virtual regenerative braking on the drive in progress, kWh. */
+    val tripRegenKwh: Double = 0.0,
     val home: NaviPlace? = null,
     val office: NaviPlace? = null,
     val commute: Km? = null,
@@ -98,8 +101,12 @@ class LiveRecorder(context: Context) {
     private val navi = NaviGateway(app, ::log)
     private val speed = SpeedSource(app, ::log)
     private val aaos = AaosSignals(app, ::log)
-    /** Once the AAOS gear property answers, the deprecated Pleos Gear API is only a fallback. */
-    private var aaosGear = false
+    /** AAOS gear first; the deprecated Pleos Gear API again once AAOS has gone quiet. */
+    private val gears = GearArbiter()
+    /** Set once an unspecified-unit arrival value above 100 shows this navigation sends Wh there. */
+    private var arrivalInWh = false
+    private var aaosJob: Job? = null
+    private var speedJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val events = Channel<Any>(Channel.UNLIMITED)
     private var started = false
@@ -146,14 +153,7 @@ class LiveRecorder(context: Context) {
         scope.launch { for (e in events) handle(e) }
         scope.launch { vehicle.signals().collect { events.send(it) } }
         scope.launch { navi.signals().collect { events.send(it) } }
-        scope.launch { aaos.signals().collect { events.send(it) } }
-        scope.launch {
-            // Completes when CAR_SPEED is not granted yet; try again so a later grant takes effect.
-            while (isActive) {
-                speed.speeds().collect { events.send(Speed(it)) }
-                delay(SPEED_RETRY_MS)
-            }
-        }
+        launchPermissionBound()
         scope.launch {
             while (isActive) {
                 navi.requestPosition()
@@ -168,6 +168,31 @@ class LiveRecorder(context: Context) {
         }
     }
 
+    /** AAOS gear/battery and speed: the subscriptions a runtime permission grant can change. */
+    private fun launchPermissionBound() {
+        aaosJob = scope.launch { aaos.signals().collect { events.send(it) } }
+        speedJob = scope.launch {
+            // Completes when CAR_SPEED is not granted yet; try again so a later grant takes effect.
+            while (isActive) {
+                speed.speeds().collect { events.send(Speed(it)) }
+                delay(SPEED_RETRY_MS)
+            }
+        }
+    }
+
+    /**
+     * The activity calls this after the runtime permission dialog: subscribe again at once instead of
+     * waiting for the retries in [AaosSignals] and the speed loop.
+     */
+    @Synchronized
+    fun onPermissionsChanged() {
+        if (!started) return
+        aaosJob?.cancel()
+        speedJob?.cancel()
+        launchPermissionBound()
+    }
+
+    @Synchronized
     fun stop() {
         scope.coroutineContext.cancelChildren()
         runCatching { vehicle.stop() }
@@ -190,7 +215,7 @@ class LiveRecorder(context: Context) {
             is CarSignal -> {
                 if (_car.value.vehicleStatus != "연결됨") _car.update { it.copy(vehicleStatus = "연결됨") }
                 when (e) {
-                    is CarSignal.Gear -> if (!aaosGear) {
+                    is CarSignal.Gear -> if (gears.acceptPleos(e.parked, _car.value.parked, now)) {
                         _car.update { it.copy(gearSource = "Pleos Gear") }
                         onGear(e.parked, now)
                     }
@@ -254,7 +279,11 @@ class LiveRecorder(context: Context) {
                     }
                 }
                 is NaviSignal.ArrivalEstimate -> {
-                    val pct = arrivalPercent(e.raw, _car.value.ev?.capacityKwh)
+                    // A field without a documented unit is read as Wh for the rest of the session once
+                    // it has shown a value only Wh can be; until then 0..100 is taken as %.
+                    if (e.unit == ArrivalUnit.UNSPECIFIED && e.raw > 100) arrivalInWh = true
+                    val unit = if (e.unit == ArrivalUnit.UNSPECIFIED && arrivalInWh) ArrivalUnit.WH else e.unit
+                    val pct = arrivalPercent(e.raw, unit, _car.value.ev?.capacityKwh)
                     if (pct != null && _car.value.route?.naviArrivalPercent == null) log("내비 도착 배터리 추정: ${e.raw} → %.1f%%".format(pct))
                     if (pct != null) {
                         pendingArrival = pct
@@ -269,8 +298,8 @@ class LiveRecorder(context: Context) {
             }
             is AaosSignals.Signal -> when (e) {
                 is AaosSignals.Signal.Gear -> {
-                    if (!aaosGear) log("기어: AAOS GEAR_SELECTION 사용")
-                    aaosGear = true
+                    if (!gears.aaosSeen) log("기어: AAOS GEAR_SELECTION 사용")
+                    gears.onAaos(now)
                     _car.update { it.copy(gearSource = "AAOS GEAR_SELECTION") }
                     onGear(e.parked, now)
                 }
@@ -294,6 +323,7 @@ class LiveRecorder(context: Context) {
                 tripKm = recorder.currentKm,
                 tripStartAt = recorder.currentStartAt,
                 tripClimateShare = recorder.currentClimateShare(now),
+                tripRegenKwh = recorder.currentRegenKwh,
             )
         }
         if (recorder.driving && now - lastSnapshotAt >= SNAPSHOT_EVERY_MS) {
@@ -396,13 +426,45 @@ class LiveRecorder(context: Context) {
         /** Straight line to road distance, used only until the navigation routes it. */
         const val ROAD_FACTOR = 1.3
 
-        /** A percentage as is; a larger number is Wh, turned into % of the car's battery. */
-        fun arrivalPercent(raw: Int, capacityKwh: Double?): Double? = when {
-            raw in 0..100 -> raw.toDouble()
-            capacityKwh != null && capacityKwh > 0 -> (raw / 1000.0 / capacityKwh * 100).takeIf { it in 0.0..100.0 }
-            else -> null
+        /**
+         * The navigation's arrival estimate as % of the battery. A known unit is taken as given; only
+         * [ArrivalUnit.UNSPECIFIED] is guessed from the size (0..100 is %, more is Wh). Wh needs the
+         * battery capacity; null when it is unknown or the value falls outside the battery.
+         */
+        fun arrivalPercent(raw: Int, unit: ArrivalUnit, capacityKwh: Double?): Double? {
+            fun fromWh(): Double? =
+                if (capacityKwh != null && capacityKwh > 0) (raw / 1000.0 / capacityKwh * 100).takeIf { it in 0.0..100.0 } else null
+            return when (unit) {
+                ArrivalUnit.PERCENT -> raw.takeIf { it in 0..100 }?.toDouble()
+                ArrivalUnit.WH -> fromWh()
+                ArrivalUnit.UNSPECIFIED -> if (raw in 0..100) raw.toDouble() else fromWh()
+            }
         }
 
         fun monthsSinceModelYear(year: Int, today: LocalDate = LocalDate.now(Trip.KST)): Int = monthsOnRoad(year, today)
+    }
+}
+
+/**
+ * Chooses between the two gear sources. The AAOS GEAR_SELECTION property wins while it is alive; the
+ * deprecated Pleos Gear API is used before AAOS has answered, and again when AAOS has been silent for
+ * [aaosStaleMs] and Pleos reports a gear different from the current one. GEAR_SELECTION only reports
+ * changes, so a silent AAOS while the gear stays the same is normal; a gear change that only Pleos
+ * reports is what shows AAOS has stopped. When both report a change, the repeat is harmless: the trip
+ * recorder ignores the same gear twice.
+ */
+class GearArbiter(private val aaosStaleMs: Long = 60_000L) {
+    private var lastAaosAt: Long? = null
+
+    val aaosSeen: Boolean get() = lastAaosAt != null
+
+    fun onAaos(now: Long) {
+        lastAaosAt = now
+    }
+
+    /** Whether a Pleos gear report ([parked]) should be applied, given the gear now shown ([current]). */
+    fun acceptPleos(parked: Boolean, current: Boolean?, now: Long): Boolean {
+        val last = lastAaosAt ?: return true
+        return now - last > aaosStaleMs && parked != current
     }
 }

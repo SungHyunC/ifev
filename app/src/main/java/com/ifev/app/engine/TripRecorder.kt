@@ -25,6 +25,8 @@ class TripRecorder(
         var speedKm: Double = 0.0,
         var climateMs: Long = 0,
         var climateSince: Long,
+        /** Virtual regenerative braking so far, kWh: see [Regen]. */
+        var regenKwh: Double = 0.0,
     )
 
     private var parked: Boolean? = null
@@ -78,7 +80,11 @@ class TripRecorder(
         if (prev == null) return
         val dtMs = (at - maxOf(prev.second, o.startAt)).coerceIn(0, MAX_SPEED_GAP_MS)
         o.speedKm += prev.first * dtMs / 1_000_000.0
+        if (dtMs > 0) o.regenKwh += Regen.recoveredKwh(prev.first, metersPerSecond.coerceAtLeast(0.0), dtMs / 1000.0)
     }
+
+    /** What an EV would have recovered braking on this trip so far, kWh. */
+    val currentRegenKwh: Double get() = open?.regenKwh ?: 0.0
 
     fun onPosition(lat: Double, lon: Double) {
         val prev = position
@@ -122,6 +128,7 @@ class TripRecorder(
             climateShare = (o.climateMs.toDouble() / durationMs).coerceIn(0.0, 1.0),
             fuelKmPerL = tripFuelKmPerL,
             distanceSource = sourceOf(o),
+            regenKwh = o.regenKwh.takeIf { it > 0 },
         )
     }
 
@@ -161,10 +168,11 @@ class TripRecorder(
         val climateMs: Long,
         val climateOn: Boolean,
         val savedAt: Long,
+        val regenKwh: Double = 0.0,
     )
 
     fun snapshot(now: Long): Snapshot? = open?.let { o ->
-        Snapshot(o.startAt, o.startOdometer, o.startPlace, o.pathKm, o.speedKm, o.climateMs + if (climateOn) now - o.climateSince else 0, climateOn, now)
+        Snapshot(o.startAt, o.startOdometer, o.startPlace, o.pathKm, o.speedKm, o.climateMs + if (climateOn) now - o.climateSince else 0, climateOn, now, o.regenKwh)
     }
 
     /**
@@ -173,7 +181,7 @@ class TripRecorder(
      */
     fun restore(s: Snapshot, now: Long) {
         if (open != null) return
-        open = Open(s.startAt, s.startOdometer, s.startPlace, s.pathKm, s.speedKm, s.climateMs, climateSince = now)
+        open = Open(s.startAt, s.startOdometer, s.startPlace, s.pathKm, s.speedKm, s.climateMs, climateSince = now, regenKwh = s.regenKwh)
         parked = false
         climateOn = s.climateOn
     }

@@ -26,6 +26,10 @@ data class Monthly(
     val fastMinutes: Double = 0.0,
     /** Of [fastMinutes], time the car would have been parked there anyway: not extra waiting. */
     val fastMinutesWhileParked: Double = 0.0,
+    /** Slow charges at the office car park; null without one. */
+    val workCharges: Double? = null,
+    /** Fuel a hybrid would have saved on the same distance, for the "a hybrid fits better" verdict. */
+    val hybridSavingWon: Double? = null,
 )
 
 data class MeasuredReport(
@@ -106,7 +110,8 @@ object Measured {
             // Long trips the same way, at 10 → 80 % top-ups: on the way and at the destination both count.
             steady = 0.0
             home = null
-            routine = kwh(everydayTrips) / ((plan.fastChargeTo - plan.publicChargeBelow).coerceAtLeast(0.05) * model.batteryKwh) * scale
+            // What the office charger put in covers everyday driving first.
+            routine = (kwh(everydayTrips) - sim.workKwh).coerceAtLeast(0.0) / ((plan.fastChargeTo - plan.publicChargeBelow).coerceAtLeast(0.05) * model.batteryKwh) * scale
             enRoute = kwh(longTrips) / perLongCharge * scale
         }
         val perRoutineMin = (plan.fastChargeTo - plan.publicChargeBelow) * model.batteryKwh / plan.fastKw * 60 + plan.fastOverheadMin
@@ -123,6 +128,12 @@ object Measured {
             fastEnRoute = enRoute,
             fastMinutes = fastMinutes,
             fastMinutesWhileParked = fastMinutes * parkedShare,
+            workCharges = if (plan.workCharging) sim.workCharges * scale else null,
+            hybridSavingWon = run {
+                val knownKm = sim.totalKm - sim.fuelUnknownKm
+                if (knownKm <= 0 || sim.fuelCostWon <= 0) return@run null
+                Hybrid.saving(sim.totalKm * scale, knownKm / (sim.fuelCostWon / prices.gasolinePerLiter), prices)
+            },
         )
         val longDates = longTrips.flatMap { listOf(it.date(), day(it.endAt)) }.toSet()
         val routineLow = sim.days.count { it.minSoc < LOW_SOC && it.date !in longDates }
@@ -130,6 +141,8 @@ object Measured {
             !homeChargingAnswered -> Verdict.UNKNOWN
             plan.homeCharging && routineLow == 0 -> Verdict.GOOD
             plan.homeCharging -> Verdict.CONDITIONAL
+            // An office charger that covers everyday life works like one at home.
+            plan.workCharging && routine < 1.0 && routineLow == 0 -> Verdict.GOOD
             routine <= Preliminary.MAX_FAST_PER_MONTH_FOR_EV -> Verdict.CONDITIONAL
             else -> Verdict.HYBRID_BETTER
         }

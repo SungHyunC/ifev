@@ -29,6 +29,8 @@ import com.ifev.app.engine.Trip
 import com.ifev.app.data.RouteTarget
 import com.ifev.app.engine.DistanceSource
 import com.ifev.app.engine.Lines
+import com.ifev.app.engine.Levers
+import com.ifev.app.engine.Regen
 import com.ifev.app.engine.Prices
 import com.ifev.app.engine.Moments
 import com.ifev.app.engine.NaviCheck
@@ -98,12 +100,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         /** Set while showing a real person's recorded weeks. */
         val realLabel: String?,
         val realDriveLabels: List<String>,
+        /** Where the real record came from: a participant's phone GPS, or a public dataset. */
+        val realSource: String?,
         /** The same recorded weeks at the January normal temperature. */
         val winter: MeasuredReport?,
         /** For a car that already is an EV: IfEV's prediction graded by the car's own battery. */
         val score: Moments.PredictionScore?,
         /** The line the car spoke last, while it is fresh. */
         val lastLine: String?,
+        /** What would change the verdict (or break it), replayed on the same weeks. */
+        val levers: Levers.Result?,
+        /** Virtual regenerative braking on the drive in progress, kWh. */
+        val tripRegenKwh: Double,
     )
 
     data class CarFact(val label: String, val value: String?, val api: String)
@@ -117,6 +125,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val demoSettings: Settings = Settings(homeCharging = true, monthsOwned = DemoScenario.MONTHS_OWNED, monthsFromVin = false),
         val demoNow: Long? = null,
         val realLabel: String? = null,
+        val realSource: String? = null,
+        /** The demo drive's virtual regeneration (the live drive's comes from the recorder). */
+        val demoRegenKwh: Double = 0.0,
     )
 
     private val recorder = app.recorder
@@ -160,6 +171,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun answerHomeCharging(available: Boolean) = editSettings { it.copy(homeCharging = available) }
 
+    fun answerWorkCharging(available: Boolean) = editSettings { it.copy(workCharging = available) }
+
     fun selectMyCar(car: FuelCar) = editSettings { it.copy(myCarId = car.id) }
 
     fun toggleVoice() = editSettings { it.copy(voiceOn = !it.voiceOn) }
@@ -195,11 +208,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (liveDriving) return
         narrator.clearLastLine()
         driveJob?.cancel()
-        local.update { it.copy(mode = Mode.DEMO, stage = Stage.DRIVING, tab = Tab.MEASURED, demoTrips = emptyList(), demoNow = null) }
+        local.update { it.copy(mode = Mode.DEMO, stage = Stage.DRIVING, tab = Tab.MEASURED, demoTrips = emptyList(), demoNow = null, demoRegenKwh = 0.0) }
         driveJob = viewModelScope.launch {
             val settings = local.value.demoSettings
             val model = EvCatalog.byId(settings.modelId)
-            val plan = ChargingPlan(homeCharging = settings.homeCharging ?: true)
+            val plan = settings.plan()
             val start = System.currentTimeMillis()
             val realMs = (DemoScenario.DRIVE_REAL_MINUTES * 60_000).toLong()
             val steps = DemoScenario.drive
@@ -211,8 +224,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             demoSay(Lines.route(model, destination, RoutePlanner.preview(model, plan.startSoc, commute, DemoScenario.DRIVE_REAL_MINUTES, month(start), plan)))
             for ((sec, km) in steps) {
                 val simulatedNow = start + realMs * sec / total
+                // Stop-and-go to the office: a stop at about every 0.8 km from 50 km/h.
+                val regen = kotlin.math.floor(km / DemoScenario.STOP_EVERY_KM) * Regen.perStopKwh(50.0)
                 local.update {
                     it.copy(
+                        demoRegenKwh = regen,
                         demoNow = simulatedNow,
                         demoCar = base.copy(
                             parked = false,
@@ -228,7 +244,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 delay(1_000)
             }
             val end = start + realMs
-            val trip = Trip(start, end, commute, Place.HOME, Place.OFFICE, SeoulClimate.meanC(month(end)), 1.0, 11.8, DistanceSource.SPEED)
+            val trip = Trip(
+                start, end, commute, Place.HOME, Place.OFFICE, SeoulClimate.meanC(month(end)), 1.0, 11.8, DistanceSource.SPEED,
+                regenKwh = kotlin.math.floor(commute / DemoScenario.STOP_EVERY_KM) * Regen.perStopKwh(50.0),
+            )
             local.update {
                 it.copy(
                     demoNow = end + 60_000,
@@ -255,6 +274,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 demoTrips = d.trips, demoNow = d.trips.maxOf { t -> t.endAt },
                 demoSettings = it.demoSettings.copy(homeCharging = d.homeCharging),
                 realLabel = d.label,
+                realSource = d.source,
             )
         }
     }
@@ -268,7 +288,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         demoFourWeeks()
         val settings = local.value.demoSettings
         val model = EvCatalog.byId(settings.modelId)
-        val plan = ChargingPlan(homeCharging = settings.homeCharging ?: true)
+        val plan = settings.plan()
         val since = DemoScenario.fourWeeks().filter { it.startAt >= DemoScenario.fourWeeksNow - DemoScenario.REFUEL_EVERY_MS }
         Moments.sinceRefuel(model, since, plan, DemoScenario.dayZero().averageFuelKmPerL)?.let { demoSay(Lines.refueled(model, it, plan.homeCharging)) }
     }
@@ -290,7 +310,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val model = EvCatalog.byId(settings.modelId)
         val myCar = FuelCarCatalog.byId(settings.myCarId)
         val (fuel, fuelSource) = resolveFuelEconomy(car.averageFuelKmPerL, myCar)
-        val plan = ChargingPlan(homeCharging = settings.homeCharging ?: true)
+        val plan = settings.plan()
         val input = PrelimInput(
             commuteOneWayKm = car.commute?.km,
             destinations = car.destinations.map { it.first },
@@ -366,10 +386,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             voiceEngine = narrator.engine,
             realLabel = l.realLabel.takeIf { l.stage == Stage.REAL },
             realDriveLabels = realDrives.map { it.label },
+            realSource = l.realSource.takeIf { l.stage == Stage.REAL },
             winter = if (report != null && report.days >= Measured.MIN_COMPARE_DAYS) {
                 Measured.report(model, Moments.winterOf(trips), plan, fallbackFuelKmPerL = fuel, nowMs = now, homeChargingAnswered = answered)
             } else null,
             score = Moments.predictionScore(model, trips),
+            levers = report?.takeIf { it.days >= Measured.MIN_COMPARE_DAYS && answered }?.let {
+                Levers.of(model, trips, plan, it, fallbackFuelKmPerL = fuel, nowMs = now)
+            },
+            tripRegenKwh = if (l.mode == Mode.DEMO) l.demoRegenKwh else car.tripRegenKwh,
             lastLine = lastLine?.takeIf { (_, at) -> System.currentTimeMillis() - at < LAST_LINE_MS }?.first,
         )
     }

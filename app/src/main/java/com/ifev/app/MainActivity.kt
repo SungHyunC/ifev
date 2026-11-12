@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
             onVoice = viewModel::toggleVoice,
             onReal = viewModel::demoReal,
             onDemoRefuel = viewModel::demoRefuel,
+            onWorkCharging = viewModel::answerWorkCharging,
         )
         setContent {
             IfEvTheme {
@@ -45,6 +46,15 @@ class MainActivity : ComponentActivity() {
                 ui?.let { MainScreen(it, actions) }
             }
         }
+    }
+
+    /**
+     * The service starts before this dialog is answered (recording must not wait on it), so a grant
+     * made here is passed on: the recorder subscribes again to what the permission unlocks.
+     */
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) recorder.onPermissionsChanged()
     }
 
     override fun onNewIntent(intent: Intent) {

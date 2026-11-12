@@ -20,6 +20,8 @@ class Voice(context: Context, private val log: (String) -> Unit) {
     @Volatile private var started = false
     private val pending = ArrayDeque<String>()
     @Volatile private var lastLine: String? = null
+    /** Bumped by [stop]; an engine that finishes starting after a stop is released, not used. */
+    @Volatile private var generation = 0
 
     /** Which engine is speaking, for the screen. */
     @Volatile var engine: String = "준비 중"
@@ -29,10 +31,12 @@ class Voice(context: Context, private val log: (String) -> Unit) {
     fun start() {
         if (started) return
         started = true
+        val gen = generation
         runCatching {
             val tts = TextToSpeech(app, Mode.ON_DEVICE)
             tts.initialize(object : OnInitializeListener {
                 override fun onSuccess() {
+                    if (gen != generation) { runCatching { tts.release() }; return }
                     runCatching { tts.setLocale(Locale.KOREA) }  // "ko-KR": the engine rejects a bare "ko"
                     tts.addEventListener(object : EventListener {
                         override fun onStart() = Unit
@@ -54,7 +58,7 @@ class Voice(context: Context, private val log: (String) -> Unit) {
                 override fun onFailure(errorType: ErrorType) {
                     log("Pleos 음성 합성 시작 실패: $errorType")
                     runCatching { tts.release() }
-                    startAndroid()
+                    if (gen == generation) startAndroid()
                 }
             })
         }.onFailure {
@@ -63,17 +67,46 @@ class Voice(context: Context, private val log: (String) -> Unit) {
         }
     }
 
+    /**
+     * Releases both engines; [start] (which [say] callers such as the narrator call first) brings them
+     * back. Called when the recording service is destroyed.
+     */
+    @Synchronized
+    fun stop() {
+        generation++
+        started = false
+        val p = pleos
+        val a = android
+        pleos = null
+        android = null
+        engine = "준비 중"
+        runCatching { p?.release() }.onFailure { log("Pleos 음성 해제 실패: ${it.message}") }
+        runCatching { a?.stop(); a?.shutdown() }.onFailure { log("Android TTS 해제 실패: ${it.message}") }
+    }
+
     private fun startAndroid() {
+        val gen = generation
         var tts: AndroidTts? = null
-        tts = AndroidTts(app) { status ->
-            if (status == AndroidTts.SUCCESS) {
-                tts?.language = Locale.KOREAN
-                android = tts
+        tts = AndroidTts(app) init@{ status ->
+            val t = tts
+            if (gen != generation) { t?.shutdown(); return@init }
+            if (status == AndroidTts.SUCCESS && t != null) {
+                setKorean(t)
+                android = t
                 engine = "Android TTS (대체)"
                 flush()
             } else {
+                log("Android TTS 시작 실패: status=$status")
                 engine = "음성 없음"
             }
+        }
+    }
+
+    /** Korean if the engine has it; otherwise it would read Korean lines with another voice, or not at all. */
+    private fun setKorean(tts: AndroidTts) {
+        val result = runCatching { tts.setLanguage(Locale.KOREA) }.getOrDefault(AndroidTts.LANG_NOT_SUPPORTED)
+        if (result == AndroidTts.LANG_MISSING_DATA || result == AndroidTts.LANG_NOT_SUPPORTED) {
+            log("Android TTS에 한국어 음성 없음(결과 $result): 설정 > 텍스트 음성 변환에서 한국어 음성 데이터를 설치해야 함")
         }
     }
 
@@ -94,7 +127,11 @@ class Voice(context: Context, private val log: (String) -> Unit) {
         lastLine = text
         val p = pleos
         if (p != null) {
-            runCatching { p.speak(text, true) }.onFailure { log("음성 실패: ${it.message}") }
+            // A synchronous failure gets the same fallback as the asynchronous onError.
+            runCatching { p.speak(text, true) }.onFailure {
+                log("Pleos 음성 실패: ${it.message}, Android TTS로 다시 말함")
+                fallbackSay(text)
+            }
             return
         }
         android?.speak(text, AndroidTts.QUEUE_FLUSH, null, "ifev")
@@ -106,12 +143,17 @@ class Voice(context: Context, private val log: (String) -> Unit) {
             a.speak(text, AndroidTts.QUEUE_FLUSH, null, "ifev")
             return
         }
+        val gen = generation
         var tts: AndroidTts? = null
-        tts = AndroidTts(app) { status ->
-            if (status == AndroidTts.SUCCESS) {
-                tts?.language = Locale.KOREAN
-                android = tts
-                tts?.speak(text, AndroidTts.QUEUE_FLUSH, null, "ifev")
+        tts = AndroidTts(app) init@{ status ->
+            val t = tts
+            if (gen != generation) { t?.shutdown(); return@init }
+            if (status == AndroidTts.SUCCESS && t != null) {
+                setKorean(t)
+                android = t
+                t.speak(text, AndroidTts.QUEUE_FLUSH, null, "ifev")
+            } else {
+                log("Android TTS 시작 실패: status=$status")
             }
         }
     }

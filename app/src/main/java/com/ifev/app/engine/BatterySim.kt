@@ -25,6 +25,10 @@ data class ChargingPlan(
     val topUpBeforeKm: Double = 100.0,
     /** Parked at least this long away from a home charger, the driver charges if the next leg needs it. */
     val minStopHoursToCharge: Double = 0.5,
+    /** A slow charger where the car stands on workdays (the office car park). */
+    val workCharging: Boolean = false,
+    /** A 7 kW wall box or public slow charger. */
+    val slowKw: Double = 7.0,
 )
 
 data class DaySummary(
@@ -34,6 +38,7 @@ data class DaySummary(
     val endSoc: Double,
     val homeCharges: Int,
     val fastCharges: Int,
+    val workCharges: Int = 0,
 )
 
 data class SimResult(
@@ -49,6 +54,9 @@ data class SimResult(
     val fastMinutesWhileParked: Double = 0.0,
     val homeKwh: Double,
     val fastKwh: Double,
+    /** Slow charges at the office car park, with [ChargingPlan.workCharging]. */
+    val workCharges: Int = 0,
+    val workKwh: Double = 0.0,
     val evCostWon: Double,
     val evCostLowWon: Double,
     val evCostHighWon: Double,
@@ -104,6 +112,8 @@ object BatterySim {
         var homeKwh = 0.0
         var fastKwh = 0.0
         var homeCharges = 0
+        var workKwh = 0.0
+        var workCharges = 0
         var fastCharges = 0
         var enRoute = 0
         var fastMinutes = 0.0
@@ -152,7 +162,17 @@ object BatterySim {
             val next = sorted.getOrNull(i + 1)
             val nextNeed = next?.let { it.distanceKm * EnergyModel.kwhPerKm(model, it.tempC, it.avgSpeedKmh, it.climateShare) / battery } ?: 0.0
             val atHomeWithCharger = plan.homeCharging && trip.endPlace == Place.HOME
-            if (!atHomeWithCharger && parkedHours >= plan.minStopHoursToCharge && soc - nextNeed < LOW_SOC && soc < plan.fastChargeTo) {
+            val atWorkCharger = plan.workCharging && trip.endPlace == Place.OFFICE && parkedHours >= plan.minHomeParkHours
+            if (atWorkCharger) {
+                // Plugged in for the working day whenever it is not nearly full, at the charger's pace.
+                if (soc < plan.homeChargeTo - 0.1) {
+                    val added = min((plan.homeChargeTo - soc) * battery, plan.slowKw * parkedHours)
+                    workKwh += added
+                    soc += added / battery
+                    workCharges++
+                    day.work++
+                }
+            } else if (!atHomeWithCharger && parkedHours >= plan.minStopHoursToCharge && soc - nextNeed < LOW_SOC && soc < plan.fastChargeTo) {
                 // Parked anyway (a meal, a night at the destination) and the next leg would run low:
                 // charge here rather than stop on the way. Counted with the long-trip charges when long.
                 parkedOverlap += min(fastCharge(plan.fastChargeTo), parkedHours * 60)
@@ -174,13 +194,15 @@ object BatterySim {
             day.endSoc = soc
         }
 
-        val charged = homeKwh + fastKwh
+        // The office charger is a slow charger: priced like the one at home.
+        val slowKwh = homeKwh + workKwh
+        val charged = slowKwh + fastKwh
         fun cost(home: Double, fast: Double): Double {
-            val perKwh = if (charged > 0) (homeKwh * home + fastKwh * fast) / charged
+            val perKwh = if (charged > 0) (slowKwh * home + fastKwh * fast) / charged
             else if (plan.homeCharging) home else fast
             return drivenKwh * perKwh
         }
-        val summaries = days.map { (date, d) -> DaySummary(date, d.km, d.minSoc, d.endSoc, d.home, d.fast) }
+        val summaries = days.map { (date, d) -> DaySummary(date, d.km, d.minSoc, d.endSoc, d.home, d.fast, d.work) }
         return SimResult(
             trips = sorted.size,
             totalKm = sorted.sumOf { it.distanceKm },
@@ -192,6 +214,8 @@ object BatterySim {
             fastMinutesWhileParked = parkedOverlap,
             homeKwh = homeKwh,
             fastKwh = fastKwh,
+            workCharges = workCharges,
+            workKwh = workKwh,
             evCostWon = cost(prices.homePerKwh, prices.fastPerKwh),
             evCostLowWon = cost(prices.homePerKwh, prices.fastPerKwhLow),
             evCostHighWon = cost(prices.homePerKwhHigh, prices.fastPerKwhHigh),
@@ -211,6 +235,7 @@ object BatterySim {
         var endSoc = start
         var home = 0
         var fast = 0
+        var work = 0
     }
 
     private const val MAX_STOPS = 20

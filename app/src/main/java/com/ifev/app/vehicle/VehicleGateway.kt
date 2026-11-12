@@ -39,9 +39,13 @@ class VehicleGateway(context: Context, private val log: (String) -> Unit) {
 
     private val vehicle = Vehicle(context.applicationContext)
 
-    fun start() = vehicle.initialize()
+    fun start() {
+        runCatching { vehicle.initialize() }.onFailure { log("차량 SDK 초기화 실패: ${it.message}") }
+    }
 
-    fun stop() = vehicle.release()
+    fun stop() {
+        runCatching { vehicle.release() }.onFailure { log("차량 SDK 해제 실패: ${it.message}") }
+    }
 
     /** Live signals. Listeners are registered on collection and removed on cancellation. */
     fun signals(): Flow<CarSignal> = callbackFlow {
@@ -96,29 +100,33 @@ class VehicleGateway(context: Context, private val log: (String) -> Unit) {
             override fun onFailed(e: Exception) = failed("EV 배터리")(e)
         }
 
-        gear.registerGearSelection(gearListener)
-        runCatching { ev.registerEvBatteryStateOfCharge(socListener) }
-        odometer.registerDistanceDriven(odoListener)
-        fuel.registerFuelPercent(percentListener)
-        fuel.registerCurrentFuelEconomy(tripEconomyListener)
-        fuel.registerCumulativeFuelEconomy(averageEconomyListener)
+        // A call can also throw synchronously (e.g. SecurityException for a permission not granted, or a
+        // property the car lacks); one refused signal must not end the flow and take the rest with it.
+        fun guard(what: String, call: () -> Unit) {
+            runCatching(call).onFailure { log("$what 실패: ${it.message}") }
+        }
+        guard("기어 구독") { gear.registerGearSelection(gearListener) }
+        guard("EV 배터리 구독") { ev.registerEvBatteryStateOfCharge(socListener) }
+        guard("누적 주행거리 구독") { odometer.registerDistanceDriven(odoListener) }
+        guard("연료량 구독") { fuel.registerFuelPercent(percentListener) }
+        guard("주행 연비 구독") { fuel.registerCurrentFuelEconomy(tripEconomyListener) }
+        guard("평균 연비 구독") { fuel.registerCumulativeFuelEconomy(averageEconomyListener) }
         // Climate is per seat zone; the first zone the car offers stands for the cabin.
         val climateArea = awaitOrNull<SeatArea?> { done ->
             hvac.checkHvacPowerCapabilities({ areas: List<SeatArea> -> done(areas.firstOrNull()) }, { e -> log("공조 지원 확인 실패: ${e.message}"); done(null) })
         }
-        climateArea?.let { hvac.registerHvacPowerState(it, climateListener) }
+        climateArea?.let { guard("공조 구독") { hvac.registerHvacPowerState(it, climateListener) } }
 
         // Listeners only fire on change; read the current values once so the screen is filled at start.
-        gear.getCurrentGearSelectionState({ g -> if (g != null && g != VehicleGear.GEAR_UNKNOWN) trySend(CarSignal.Gear(g == VehicleGear.GEAR_PARK)) }, failed("기어 조회"))
-        odometer.getCurrentDistanceDriven({ km -> if (km != null) trySend(CarSignal.Odometer(km.toDouble())) }, failed("누적 주행거리 조회"))
-        fuel.getFuelPercent({ p -> if (p != null) trySend(CarSignal.FuelPercent(p)) }, failed("연료량 조회"))
-        fuel.getCumulativeFuelEconomy({ v -> v?.toDouble()?.let(::kmPerLiterFromLitersPer100Km)?.let { trySend(CarSignal.AverageFuelEconomy(it)) } }, failed("평균 연비 조회"))
-        climateArea?.let { area -> hvac.getHvacPowerState(area, { on -> if (on != null) trySend(CarSignal.Climate(on)) }, failed("공조 조회")) }
+        guard("기어 조회") { gear.getCurrentGearSelectionState({ g -> if (g != null && g != VehicleGear.GEAR_UNKNOWN) trySend(CarSignal.Gear(g == VehicleGear.GEAR_PARK)) }, failed("기어 조회")) }
+        guard("누적 주행거리 조회") { odometer.getCurrentDistanceDriven({ km -> if (km != null) trySend(CarSignal.Odometer(km.toDouble())) }, failed("누적 주행거리 조회")) }
+        guard("연료량 조회") { fuel.getFuelPercent({ p -> if (p != null) trySend(CarSignal.FuelPercent(p)) }, failed("연료량 조회")) }
+        guard("평균 연비 조회") { fuel.getCumulativeFuelEconomy({ v -> v?.toDouble()?.let(::kmPerLiterFromLitersPer100Km)?.let { trySend(CarSignal.AverageFuelEconomy(it)) } }, failed("평균 연비 조회")) }
+        climateArea?.let { area -> guard("공조 조회") { hvac.getHvacPowerState(area, { on -> if (on != null) trySend(CarSignal.Climate(on)) }, failed("공조 조회")) } }
         // A fuel car refuses these (not supported); that is expected, not an error to show.
-        runCatching {
-            ev.getEvBatteryStateOfCharge({ v -> if (v != null && v in 0..100) trySend(CarSignal.EvSoc(v)) }, { log("EV 배터리 없음: ${it.message}") })
-            ev.getCumulativeEvEfficiency({ v -> if (v != null && v in 1f..15f) trySend(CarSignal.EvEfficiency(v.toDouble())) }, { log("EV 전비 없음: ${it.message}") })
-        }
+        // Each on its own, so a refused SOC read does not skip the efficiency read.
+        guard("EV 배터리 조회") { ev.getEvBatteryStateOfCharge({ v -> if (v != null && v in 0..100) trySend(CarSignal.EvSoc(v)) }, { log("EV 배터리 없음: ${it.message}") }) }
+        guard("EV 전비 조회") { ev.getCumulativeEvEfficiency({ v -> if (v != null && v in 1f..15f) trySend(CarSignal.EvEfficiency(v.toDouble())) }, { log("EV 전비 없음: ${it.message}") }) }
 
         awaitClose {
             runCatching { gear.unregisterGearSelection(gearListener) }
@@ -140,9 +148,13 @@ class VehicleGateway(context: Context, private val log: (String) -> Unit) {
         return vin?.let(::modelYearFromVin)
     }
 
+    /** Null on timeout, and also when [call] throws synchronously, so the caller's coroutine survives. */
     private suspend fun <T> awaitOrNull(timeoutMs: Long = 5_000, call: (done: (T) -> Unit) -> Unit): T? =
         withTimeoutOrNull(timeoutMs) {
-            suspendCancellableCoroutine { cont -> call { value -> if (cont.isActive) cont.resume(value) } }
+            suspendCancellableCoroutine<T?> { cont ->
+                runCatching { call { value -> if (cont.isActive) cont.resume(value) } }
+                    .onFailure { e -> log("차량 SDK 호출 실패: ${e.message}"); if (cont.isActive) cont.resume(null) }
+            }
         }
 }
 

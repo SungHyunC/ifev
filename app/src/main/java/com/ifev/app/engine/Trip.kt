@@ -30,6 +30,8 @@ data class Trip(
     val distanceSource: DistanceSource = DistanceSource.ODOMETER,
     /** Energy the car's own battery lost on this trip, kWh: only when the car already is an EV. */
     val evKwhUsed: Double? = null,
+    /** What an EV would have recovered braking on this trip, kWh ([Regen]); part of the trip's energy, not extra. */
+    val regenKwh: Double? = null,
 ) {
     val hours: Double get() = ((endAt - startAt) / 3_600_000.0).coerceAtLeast(1.0 / 60)
     val avgSpeedKmh: Double get() = distanceKm / hours

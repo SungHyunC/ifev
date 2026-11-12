@@ -60,6 +60,7 @@ class Actions(
     val onVoice: () -> Unit,
     val onReal: (Int) -> Unit,
     val onDemoRefuel: () -> Unit,
+    val onWorkCharging: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -115,16 +116,23 @@ private fun TopBar(ui: UiState, actions: Actions) {
 @Composable
 private fun DemoBar(ui: UiState, actions: Actions) {
     val stage = ui.stage
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Label("시연 시나리오 (가상 데이터)", modifier = Modifier.padding(end = 8.dp))
-        PleosButton("① 설치 직후", stage == Stage.DAY_ZERO, actions.onDemoDayZero)
-        PleosButton("② 출근길 주행", stage == Stage.DRIVING, actions.onDemoDrive)
-        PleosButton("③ 4주 뒤", stage == Stage.FOUR_WEEKS, actions.onDemoFourWeeks)
-        PleosButton("주유하는 순간", false, actions.onDemoRefuel)
-        ui.realDriveLabels.forEachIndexed { i, label ->
-            PleosButton("④ 실제 기록 · $label", ui.realLabel == label, { actions.onReal(i) })
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Label("시연 시나리오 (가상 데이터)", modifier = Modifier.padding(end = 8.dp))
+            PleosButton("① 설치 직후", stage == Stage.DAY_ZERO, actions.onDemoDayZero)
+            PleosButton("② 출근길 주행", stage == Stage.DRIVING, actions.onDemoDrive)
+            PleosButton("③ 4주 뒤", stage == Stage.FOUR_WEEKS, actions.onDemoFourWeeks)
+            PleosButton("주유하는 순간", false, actions.onDemoRefuel)
         }
-        Label("시연의 2~4주 기록은 가상 데이터예요. 실시간 모드의 기록만 실제 주행이에요.", style = PleosType.labelSmall, modifier = Modifier.padding(start = 8.dp))
+        if (ui.realDriveLabels.isNotEmpty()) {
+            // Real recorded weeks on the same screens: a public dataset and, once collected, participants.
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Label("실제 주행 기록", modifier = Modifier.padding(end = 8.dp))
+                ui.realDriveLabels.forEachIndexed { i, label ->
+                    PleosButton("④ $label", ui.realLabel == label, { actions.onReal(i) })
+                }
+            }
+        }
     }
 }
 
@@ -137,7 +145,10 @@ private fun DemoBar(ui: UiState, actions: Actions) {
 @Composable
 private fun DrivingView(ui: UiState) {
     val c = LocalPleosColors.current
-    val homeWon = ui.tripKwh * Prices().homePerKwh
+    // Priced the way the driver charges: at home (slow) or, without a home charger, at a fast charger.
+    val homeCharging = ui.settings.homeCharging != false
+    val homeWon = ui.tripKwh * if (homeCharging) Prices().homePerKwh else Prices().fastPerKwh
+    val costLabel = if (homeCharging) "집 충전" else "급속 충전"
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             Gauge(
@@ -160,7 +171,8 @@ private fun DrivingView(ui: UiState) {
                     Text("%.1f km".format(ui.car.tripKm), style = PleosType.headline, color = c.textPrimary)
                     Spacer(Modifier.height(12.dp))
                     Text("전기 %.1fkWh".format(ui.tripKwh), style = PleosType.title, color = c.ev)
-                    Text("집 충전 약 %,d원".format(homeWon.roundToInt()), style = PleosType.body, color = c.textSecondary)
+                    Text("$costLabel 약 %,d원".format(homeWon.roundToInt()), style = PleosType.body, color = c.textSecondary)
+                    RegenLine(ui)
                     Spacer(Modifier.weight(1f))
                 }
             }
@@ -183,13 +195,31 @@ private fun DrivingView(ui: UiState) {
         if (ui.car.fuelPercent != null) {
             Card(Modifier.fillMaxWidth()) {
                 Text(
-                    "이번 주행 %.1fkm · 전기 %.1fkWh · 집 충전 약 %,d원".format(ui.car.tripKm, ui.tripKwh, homeWon.roundToInt()),
+                    "이번 주행 %.1fkm · 전기 %.1fkWh · ".format(ui.car.tripKm, ui.tripKwh) + costLabel + " 약 %,d원".format(homeWon.roundToInt()),
                     style = PleosType.bodyStrong,
                     color = c.textPrimary,
                 )
+                RegenLine(ui)
             }
         }
     }
+}
+
+/**
+ * Virtual regenerative braking: grows each time the car slows down. Part of the trip's kWh above
+ * (certified ranges include it), so it is a breakdown, not a bonus.
+ */
+@Composable
+private fun RegenLine(ui: UiState) {
+    val c = LocalPleosColors.current
+    if (ui.tripRegenKwh < 0.01) return
+    Spacer(Modifier.height(8.dp))
+    Text(
+        "감속할 때 모터가 되찾은 전기 %.2fkWh (배터리 +%.1f%%p)".format(ui.tripRegenKwh, ui.tripRegenKwh / ui.model.batteryKwh * 100),
+        style = PleosType.body,
+        color = c.ev,
+    )
+    Label("브레이크 열로 버려지던 몫 · 추정, 위 전기 사용량에 이미 포함", style = PleosType.labelSmall)
 }
 
 @Composable
@@ -277,7 +307,11 @@ private fun PrelimView(ui: UiState, actions: Actions) {
             if (hybrid) "전기차로 바꾸면 연료비" else "연료비 절감",
             if (low != null && high != null) "연 ${manwonRange(low, high)}" else "-",
             // When the answer is "a hybrid fits better", the EV saving is the price of the hassle, not a reason.
-            if (hybrid && p.fastChargesPerMonth != null) "아끼지만 공공 급속을 월 %.1f회 다녀야 해요".format(p.fastChargesPerMonth) else fuelCaption(ui),
+            when {
+                hybrid && p.annualHybridSavingWon != null -> "하이브리드면 충전 없이 연 ${manwon(p.annualHybridSavingWon)}"
+                hybrid && p.fastChargesPerMonth != null -> "아끼지만 공공 급속을 월 %.1f회 다녀야 해요".format(p.fastChargesPerMonth)
+                else -> fuelCaption(ui)
+            },
             color = if (hybrid) c.textPrimary else c.ev,
         )
     }
@@ -414,6 +448,7 @@ private fun MeasuredView(ui: UiState) {
                 when {
                     d.fastCharges > 0 -> Badge("급속 ${d.fastCharges}회", c.fuel, c.fuelSoft)
                     d.homeCharges > 0 -> Badge("집 충전", c.ev, c.evSoft)
+                    d.workCharges > 0 -> Badge("회사 충전", c.ev, c.evSoft)
                     else -> Label("충전 없음", style = PleosType.labelSmall)
                 }
             }
@@ -437,19 +472,20 @@ private fun ReportView(ui: UiState, actions: Actions) {
             // Made-up weeks get no confidence rating: "가상" says what they are.
             if (ui.mode == Mode.DEMO && ui.realLabel == null) Badge("가상 기록 ${r.days}일", c.textTertiary, c.surfaceHigh)
             else Badge("기록 ${r.days}일(운전 ${r.drivingDays}일) · 신뢰도 ${confidenceLabel(r.confidence)}", c.textTertiary, c.surfaceHigh)
-            if (ui.realLabel != null) Badge("실제 주행 기록 · 폰 GPS로 수집 (${ui.realLabel})", c.ev, c.evSoft)
+            if (ui.realLabel != null) Badge("실제 주행 기록 · ${ui.realSource ?: "폰 GPS로 수집"}", c.ev, c.evSoft)
             else if (ui.mode == Mode.DEMO) Badge("시연용 가상 데이터", c.textPrimary, c.fuelSoft)
         }
         Spacer(Modifier.height(16.dp))
         Text("기록한 ${r.days}일을 한 달로 보면, 이 차가 ${ui.model.ifItWere}", style = PleosType.title, color = c.textSecondary)
         Spacer(Modifier.height(8.dp))
-        Text(r.verdict.title, style = PleosType.headline, color = verdictColor(r.verdict))
+        Text(r.verdict.titleFor(ui.settings.plan()), style = PleosType.headline, color = verdictColor(r.verdict))
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             Stat(
                 "충전",
-                "%.0f번".format((m.homeCharges ?: 0.0) + m.fastCharges),
+                "%.0f번".format((m.homeCharges ?: 0.0) + (m.workCharges ?: 0.0) + m.fastCharges),
                 if (m.homeCharges != null) "집 %.0f · 급속 %.0f".format(m.homeCharges, m.fastCharges)
+                else if (m.workCharges != null) "회사 %.0f · 급속 %.1f".format(m.workCharges, m.fastCharges)
                 else if (m.fastEnRoute >= 0.05) "평소 급속 %.1f · 장거리 날 %.1f".format(m.fastRoutine, m.fastEnRoute)
                 else "모두 평소 급속",
             )
@@ -458,7 +494,15 @@ private fun ReportView(ui: UiState, actions: Actions) {
                 "%.0f일".format(m.lowSocDays ?: 0.0),
                 (if (sim.lowSocDays > 0 && r.routineLowDays == 0) "모두 장거리 날 · " else "") + "가장 낮을 때 ${(sim.minSoc * 100).roundToInt()}%",
             )
-            Stat("연료비 절감", m.savingWon?.let { "월 ${manwon(it)}" } ?: "-", m.savingWon?.let { "연 약 ${manwon(it * 12)}" }, color = c.ev)
+            val hybridVerdict = r.verdict == Verdict.HYBRID_BETTER
+            Stat(
+                if (hybridVerdict) "전기차로 바꾸면 연료비" else "연료비 절감",
+                m.savingWon?.let { "월 ${manwon(it)}" } ?: "-",
+                // The other answer, side by side: a hybrid saves this much with no charging at all.
+                if (hybridVerdict && m.hybridSavingWon != null) "하이브리드면 충전 없이 월 ${manwon(m.hybridSavingWon)}"
+                else m.savingWon?.let { "연 약 ${manwon(it * 12)}" },
+                color = if (hybridVerdict) c.textPrimary else c.ev,
+            )
             Stat(
                 "급속 충전 시간",
                 "%.0f분".format(m.fastMinutes),
@@ -467,7 +511,8 @@ private fun ReportView(ui: UiState, actions: Actions) {
             )
         }
     }
-    ui.winter?.let { WinterCard(r, it) }
+    ui.winter?.let { WinterCard(r, it, ui.settings.plan()) }
+    ui.levers?.let { LeversCard(ui, it, actions) }
     Card(Modifier.fillMaxWidth()) {
         Text("예비 진단 vs 실제 주행", style = PleosType.bodyStrong, color = c.textPrimary)
         Spacer(Modifier.height(12.dp))
@@ -515,6 +560,53 @@ private fun Empty() {
  * The live check: the car is an EV, so Hyundai's navigation estimates its arrival battery itself.
  * IfEV's energy model, applied to the same route and this car's battery, sits next to it.
  */
+/**
+ * "What would change the answer": the same weeks replayed with one thing changed. Starts from where the
+ * car already stands for hours (from the P record), since a charger there costs no extra time.
+ */
+@Composable
+private fun LeversCard(ui: UiState, l: com.ifev.app.engine.Levers.Result, actions: Actions) {
+    val c = LocalPleosColors.current
+    val p = l.parking
+    Card(Modifier.fillMaxWidth()) {
+        Text(if (l.improving) "판정을 바꾸는 한 가지" else "이 판정이 바뀌는 조건", style = PleosType.bodyStrong, color = c.textPrimary)
+        Spacer(Modifier.height(8.dp))
+        val stays = listOfNotNull(
+            p.homeDays.takeIf { it > 0 }?.let { "밤에 집 평균 %.0f시간".format(p.homeMeanHours) },
+            p.officeDays.takeIf { it > 0 }?.let { "평일 낮 회사 평균 %.0f시간(%d일)".format(p.officeMeanHours, p.officeDays) },
+            p.otherLongStays.takeIf { it > 0 }?.let { "그 밖에 4시간 넘게 ${it}번" },
+        )
+        if (stays.isNotEmpty()) {
+            Label("이 차가 오래 서 있던 곳 (기어 P 기록): " + stays.joinToString(" · "))
+            Spacer(Modifier.height(8.dp))
+        }
+        l.levers.forEachIndexed { i, lever ->
+            if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
+            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(lever.change, style = PleosType.bodySmallStrong, color = c.textPrimary)
+                    Label(lever.because, style = PleosType.labelSmall)
+                }
+                Label(if (lever.routineFast < 0.05) "평소 급속 없음" else "평소 급속 월 %.1f회".format(lever.routineFast), modifier = Modifier.width(220.dp))
+                Badge(shortVerdict(lever.verdict), verdictColor(lever.verdict), c.surfaceHigh)
+            }
+        }
+        if (l.levers.isEmpty()) Label("집 충전기가 있으면 판정은 그대로예요.")
+        if (p.officeDays >= 2 && ui.settings.workCharging == null) {
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("회사 주차장에 완속 충전기가 있나요?", style = PleosType.bodySmallStrong, color = c.textPrimary, modifier = Modifier.weight(1f))
+                PleosButton("있어요", false, { actions.onWorkCharging(true) })
+                Spacer(Modifier.width(12.dp))
+                PleosButton("없어요", false, { actions.onWorkCharging(false) })
+            }
+        } else if (ui.settings.workCharging == true) {
+            Spacer(Modifier.height(8.dp))
+            Label("회사 주차장 완속 충전(7kW)을 넣어 계산했어요.", style = PleosType.labelSmall)
+        }
+    }
+}
+
 @Composable
 private fun NaviCheckCard(n: NaviCheck, place: String?) {
     val c = LocalPleosColors.current
@@ -552,7 +644,7 @@ private fun NaviCheckCard(n: NaviCheck, place: String?) {
 
 /** The recorded weeks again at the January normal: the season a driver worries about, before it comes. */
 @Composable
-private fun WinterCard(now: com.ifev.app.engine.MeasuredReport, w: com.ifev.app.engine.MeasuredReport) {
+private fun WinterCard(now: com.ifev.app.engine.MeasuredReport, w: com.ifev.app.engine.MeasuredReport, plan: com.ifev.app.engine.ChargingPlan) {
     val c = LocalPleosColors.current
     val n = now.monthly
     val m = w.monthly
@@ -570,7 +662,7 @@ private fun WinterCard(now: com.ifev.app.engine.MeasuredReport, w: com.ifev.app.
             Stat("충전", "${janN}번", "지금 ${nowN}번 → %+d".format(janN - nowN))
             Stat("배터리 20% 미만", "%.0f일".format(m.lowSocDays ?: 0.0), "지금 %.0f일".format(n.lowSocDays ?: 0.0))
             Stat("연료비 절감", m.savingWon?.let { "월 ${manwon(it)}" } ?: "-", n.savingWon?.let { "지금 월 ${manwon(it)}" }, color = c.ev)
-            Stat("판정", if (w.verdict == now.verdict) "그대로" else "바뀜", w.verdict.title, color = verdictColor(w.verdict))
+            Stat("판정", if (w.verdict == now.verdict) "그대로" else "바뀜", w.verdict.titleFor(plan), color = verdictColor(w.verdict))
         }
     }
 }
@@ -757,8 +849,8 @@ private fun ModelTable(ui: UiState, actions: Actions, measured: Boolean) {
 }
 
 private fun shortVerdict(v: Verdict) = when (v) {
-    Verdict.GOOD -> "집 충전이면 충분"
-    Verdict.CONDITIONAL -> "급속 충전 필요"
+    Verdict.GOOD -> "충분해요"
+    Verdict.CONDITIONAL -> "급속 생활 가능"
     Verdict.HYBRID_BETTER -> "하이브리드 권장"
     Verdict.UNKNOWN -> "-"
 }
