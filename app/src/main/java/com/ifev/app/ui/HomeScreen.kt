@@ -1,5 +1,9 @@
 package com.ifev.app.ui
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,10 +22,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ifev.app.MainViewModel.Mode
 import com.ifev.app.MainViewModel.UiState
 import com.ifev.app.data.GearState
+import com.ifev.app.data.TurnState
+import androidx.compose.ui.graphics.Color
 import com.ifev.app.engine.EnergyModel
 import com.ifev.app.engine.SeoulClimate
 import com.ifev.app.engine.ifItWere
@@ -51,8 +58,12 @@ fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, action
     val v = visual.state
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
         // ── the virtual EV ──
+        val steering = if (ui.mode == Mode.DEMO) SteeringConfig() else liveSteering
         Box(
-            Modifier.weight(1.45f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(c.surface),
+            Modifier.weight(1.45f).fillMaxHeight()
+                .clip(RoundedCornerShape(24.dp))
+                .background(c.background)
+                .border(1.dp, c.divider, RoundedCornerShape(24.dp)),
         ) {
             CarTopView(
                 input = TopViewInput(
@@ -69,30 +80,54 @@ fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, action
                     restricted = v.restricted,
                 ),
                 modifier = Modifier.fillMaxSize(),
-                steering = if (ui.mode == Mode.DEMO) SteeringConfig() else liveSteering,
+                steering = steering,
             )
-            Column(Modifier.padding(28.dp)) {
-                Text("${ui.model.ifItWere}", style = PleosType.bodyStrong, color = c.textPrimary)
-                Spacer(Modifier.height(6.dp))
-                Badge(
-                    when {
-                        ui.mode == Mode.DEMO && driving -> "시연 · 가상 주행"
-                        replaying -> "방금 주행 다시 보기 · 2배속"
-                        v.restricted -> "주행 중 · 1초에 한 번 갱신"
-                        v.gear == GearState.PARK -> "정차 중"
-                        else -> gearLabel(v.gear)
-                    },
-                    c.textSecondary, c.surfaceHigh,
-                )
+            Column(Modifier.padding(32.dp)) {
+                Text(ui.model.ifItWere, style = PleosType.title, color = c.textPrimary)
+                Spacer(Modifier.height(14.dp))
+                // What the car is doing, in words: only the states that are on.
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Chip(
+                        when {
+                            ui.mode == Mode.DEMO && driving -> "시연 · 가상 주행"
+                            replaying -> "다시 보기 · 2배속"
+                            v.restricted -> "주행 중 · 1초에 한 번 갱신"
+                            v.gear == GearState.PARK -> "정차 중"
+                            else -> gearLabel(v.gear)
+                        },
+                        c.textTertiary, c.surfaceHigh,
+                    )
+                    if (v.brake == true) Chip("브레이크", c.negative, Color(0xFF2A0F16))
+                    when (v.turn) {
+                        TurnState.LEFT -> Chip("왼쪽 방향지시등", c.fuel, c.fuelSoft)
+                        TurnState.RIGHT -> Chip("오른쪽 방향지시등", c.fuel, c.fuelSoft)
+                        TurnState.OFF -> {}
+                    }
+                    v.steeringDeg?.let { steering.frontWheelDeg(it) }?.takeIf { abs(it) >= 2 }?.let { deg ->
+                        Chip("조향 ${if (deg < 0) "왼쪽" else "오른쪽"} ${abs(deg).roundToInt()}°", c.textTertiary, c.surfaceHigh)
+                    }
+                }
+            }
+            if (!locked) {
+                // The report, one tap away while parked (hidden whenever the car is not safely in P).
+                Box(
+                    Modifier.align(Alignment.CenterStart).padding(start = 20.dp).size(72.dp)
+                        .clip(CircleShape).background(c.surface).border(1.dp, c.divider, CircleShape)
+                        .clickable(onClick = actions.onOpenReport),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("‹", style = PleosType.titleLarge, color = c.textSecondary)
+                }
             }
         }
         // ── the same in numbers ──
-        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Card(Modifier.fillMaxWidth()) {
-                Label("가상 배터리")
+                Label("가상 배터리", style = PleosType.body)
                 Text("${(ui.ghostSoc * 100).roundToInt()}%", style = PleosType.headline, color = if (ui.ghostSoc < 0.3) c.fuel else c.ev)
-                LevelBar(ui.ghostSoc, if (ui.ghostSoc < 0.3) c.fuel else c.ev)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
+                LevelBar(ui.ghostSoc, if (ui.ghostSoc < 0.3) c.fuel else c.ev, height = 20)
+                Spacer(Modifier.height(10.dp))
                 Label(if (ui.chargedWhileParked) "세워 둔 사이 충전하고 ${(ui.startSoc * 100).roundToInt()}%에서 출발" else "출발할 때 ${(ui.startSoc * 100).roundToInt()}%")
             }
             NumberRow("이번 주행", if (ui.car.tripKm > 0) "%.1f km · %.1f kWh".format(ui.car.tripKm, ui.tripKwh) else "-",
@@ -100,7 +135,7 @@ fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, action
             NumberRow(
                 "감속 때 되찾은 전기",
                 if (ui.tripRegenKwh >= 0.01) "%.2f kWh".format(ui.tripRegenKwh) else "-",
-                if (visual.regenLevel > 0.05) "지금 회생 중" else "브레이크 대신 모터가 되찾는 몫 · 추정",
+                if (visual.regenLevel > 0.05) "지금 회생 중" else "모터가 되찾은 몫 · 추정",
                 highlight = visual.regenLevel > 0.05,
             )
             NumberRow("공조", climateLine(v), climateCaption(ui))
@@ -115,7 +150,7 @@ fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, action
             if (!locked) {
                 val verdict = ui.report?.verdict ?: ui.prelim.verdict
                 Card(Modifier.fillMaxWidth()) {
-                    Label(if (ui.report != null) "기록한 ${ui.report.days}일 판정" else "설치 직후 예비 판정")
+                    Label(if (ui.report != null) "기록한 ${ui.report.days}일 판정" else "설치 직후 예비 판정", style = PleosType.body)
                     Text(verdict.titleFor(ui.settings.plan()), style = PleosType.bodyStrong, color = c.textPrimary)
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -129,15 +164,27 @@ fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, action
 }
 
 @Composable
+private fun Chip(text: String, color: Color, background: Color) {
+    Text(
+        text,
+        style = PleosType.labelStrong,
+        color = color,
+        modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(background).padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
 private fun NumberRow(title: String, value: String, caption: String?, highlight: Boolean = false) {
     val c = LocalPleosColors.current
-    Card(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Label(title, modifier = Modifier.width(220.dp))
-            Column(Modifier.weight(1f)) {
-                Text(value, style = PleosType.title, color = if (highlight) c.ev else c.textPrimary)
-                if (caption != null) Label(caption, style = PleosType.labelSmall)
-            }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.surface)
+            .padding(horizontal = 32.dp, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Label(title, style = PleosType.body, modifier = Modifier.width(250.dp))
+        Column(Modifier.weight(1f)) {
+            Text(value, style = PleosType.title, color = if (highlight) c.ev else c.textPrimary, maxLines = 1)
+            if (caption != null) Text(caption, style = PleosType.label, color = c.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -162,7 +209,7 @@ private fun climateCaption(ui: UiState): String? {
     val speed = ui.car.tripKm.takeIf { it > 0 }?.let { 30.0 } ?: 30.0
     val onKm = 1 / EnergyModel.kwhPerKm(ui.model, temp, speed, 1.0)
     val offKm = 1 / EnergyModel.kwhPerKm(ui.model, temp, speed, 0.0)
-    return "전비 %.1f km/kWh · 끄면 %.1f (서울 %d월 평년 %.0f℃)".format(onKm, offKm, month, temp)
+    return "전비 %.1f km/kWh · 끄면 %.1f".format(onKm, offKm)
 }
 
 /**

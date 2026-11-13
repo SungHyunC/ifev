@@ -9,9 +9,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.ifev.app.ui.Actions
 import com.ifev.app.ui.IfEvTheme
 import com.ifev.app.ui.MainScreen
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class MainActivity : ComponentActivity() {
 
@@ -70,11 +74,17 @@ class MainActivity : ComponentActivity() {
 
     /** `adb shell am start -n com.ifev.app/.MainActivity --es demo day0|drive|weeks` jumps to a demo stage for recordings. */
     private fun handleDemoExtra(intent: Intent) {
-        when (intent.getStringExtra(EXTRA_DEMO)) {
-            "day0" -> viewModel.demoDayZero()
-            "drive" -> viewModel.demoDrive()
-            "weeks" -> viewModel.demoFourWeeks()
-            "refuel" -> viewModel.demoRefuel()
+        val stage = intent.getStringExtra(EXTRA_DEMO) ?: return
+        // On a cold start the gear is not known yet and the safety gate holds every demo back, so
+        // wait (a few seconds at most) until the car is confirmed in P.
+        lifecycleScope.launch {
+            withTimeoutOrNull(10_000) { viewModel.ui.first { it != null && !it.locked } } ?: return@launch
+            when (stage) {
+                "day0" -> viewModel.demoDayZero()
+                "drive" -> viewModel.demoDrive()
+                "weeks" -> viewModel.demoFourWeeks()
+                "refuel" -> viewModel.demoRefuel()
+            }
         }
     }
 

@@ -1,6 +1,5 @@
 package com.ifev.app.ui.topview
 
-import android.graphics.Paint
 import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -22,7 +21,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -43,26 +41,26 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
 /**
- * The virtual EV seen from above and behind: a fixed camera pitched about 60° down, the car fixed in the
- * middle, the lane markings flowing the way the car drives. Drawn with Compose Canvas only: one
- * drawVertices call for every polygon (plus one more while the car is translucent), no extra library.
+ * The virtual EV seen straight from above, drawn as a neon outline (cyan line plus glow, like the app icon)
+ * on a transparent background: the caller draws the card. Android Canvas only (paths, strokes, a blur mask
+ * filter for the glow, radial gradients for lamp light), no extra library; a few dozen draw calls per frame.
  *
- * What it shows: front wheels steer ([steering] says how to read the raw value), wheels turn (tread
- * pattern), brake lamps, turn signals (1.5 Hz), a battery gauge on the glass roof (charge level, teal,
- * amber below 30 %, the part used on this trip as empty cells), regeneration as teal light running from the
- * front wheels into the gauge, a faint airflow over the cabin while the climate system is on, and a
- * translucent body while the car is "waiting for signal". The text for that state is the caller's: pass
+ * What it shows: front wheels steer ([steering] says how to read the raw value), tread lines run in the
+ * wheels, lane dashes flow beside the car, red brake lamp lines with a red glow, amber turn signal arcs at
+ * the nose and tail corner (1.5 Hz), a restrained battery gauge in the glass roof (cyan, amber below 30 %,
+ * the part used on this trip as empty cells above the fill), regeneration as light particles running from
+ * the front wheels to the middle of the car, a faint airflow in the cabin while the climate system is on,
+ * and a dimmed picture while the car is "waiting for signal". The text for that state is the caller's: pass
  * [onModeChange] to hear about it.
  *
  * [routeLabel], when not null, is a small pill at the top of the view.
  *
  * `input.restricted` (the car restricts the screen while driving): the picture is refreshed at most once a
- * second and nothing in it moves: wheel pattern and lane markings at rest, turn signals steady on,
+ * second and nothing in it moves: tread lines and lane dashes at rest, turn signals steady on,
  * regeneration at a steady strength, no airflow motion. Otherwise it runs at the display's frame rate while
  * something moves, and only when something changes while nothing does.
  *
- * No touch handling. Day or night comes from the app theme ([LocalPleosColors], which IfEvTheme sets from
- * isSystemInDarkTheme()).
+ * No touch handling. The look is the same by day and night (the colours are fixed in [NeonColors]).
  */
 @Composable
 fun CarTopView(
@@ -74,23 +72,15 @@ fun CarTopView(
     onModeChange: ((VisualState) -> Unit)? = null,
 ) {
     val colors = LocalPleosColors.current
-    val palette = remember(colors) {
-        TopViewPalette(
-            dark = colors.isDark,
-            ev = colors.ev.toArgb(),
-            fuel = colors.fuel.toArgb(),
-            line = colors.textQuaternary.toArgb(),
-        )
-    }
     val latestState = rememberUpdatedState(input)
     val latest by latestState
     val modeCallback by rememberUpdatedState(onModeChange)
     val smoother = remember { VisualSmoother(steering) }
     SideEffect { smoother.steering = steering }
-    val renderer = remember { TopViewRenderer() }
+    val scene = remember { NeonScene() }
+    val painter = remember { NeonPainter() }
     val frame = remember { FrameData() }
     val tick = remember { mutableLongStateOf(0L) }
-    val paint = remember { Paint().apply { color = android.graphics.Color.WHITE; isAntiAlias = true } }
     val measurer = rememberTextMeasurer()
     val label = remember { LabelCache() }
     val preview = LocalInspectionMode.current
@@ -131,18 +121,18 @@ fun CarTopView(
 
     // The draw block is remembered, so a parent that recomposes with every new sample cannot make this view
     // draw again: it draws for a new frame (the tick), a new size or a new theme, and for nothing else.
-    val onDraw: DrawScope.() -> Unit = remember(renderer, smoother, frame, tick, paint, measurer, label, palette, colors, routeLabel, preview) {
+    val onDraw: DrawScope.() -> Unit = remember(scene, painter, smoother, frame, tick, measurer, label, colors, routeLabel, preview) {
         {
             // Reading the tick makes this block run again for every new frame.
             if (tick.longValue >= 0L) {
-                renderer.layout(size.width, size.height, palette)
+                scene.layout(size.width, size.height)
                 if (!frame.ready && preview) {
                     val inp = latestState.value
                     frame.publish(smoother.step(inp, 0L), inp, false, 0L)
                 }
-                if (frame.ready && renderer.ready) {
-                    renderer.update(frame.state, frame.input, frame.animated, frame.nowMs)
-                    drawIntoCanvas { submit(it.nativeCanvas, renderer, paint) }
+                if (frame.ready && scene.ready) {
+                    scene.update(frame.state, frame.input, frame.animated, frame.nowMs)
+                    drawIntoCanvas { painter.draw(it.nativeCanvas, scene) }
                     if (!routeLabel.isNullOrBlank()) drawRouteLabel(routeLabel, measurer, label, colors)
                 }
             }
@@ -204,22 +194,6 @@ private class LabelCache {
     var layout: TextLayoutResult? = null
 }
 
-/** One drawVertices call for everything, or two (ground, then the car in a translucent layer). */
-private fun submit(canvas: android.graphics.Canvas, r: TopViewRenderer, paint: Paint) {
-    if (!r.ready) return
-    val floats = r.vertexCount * 2
-    val mode = android.graphics.Canvas.VertexMode.TRIANGLES
-    if (r.carAlpha >= 0.995f) {
-        canvas.drawVertices(mode, floats, r.positions, 0, null, 0, r.colors, 0, r.indices, 0, r.groundIndexCount + r.carIndexCount, paint)
-        return
-    }
-    canvas.drawVertices(mode, floats, r.positions, 0, null, 0, r.colors, 0, r.indices, 0, r.groundIndexCount, paint)
-    val b = r.carBounds
-    val layer = canvas.saveLayerAlpha(b[0], b[1], b[2], b[3], (r.carAlpha * 255f + 0.5f).toInt().coerceIn(0, 255))
-    canvas.drawVertices(mode, floats, r.positions, 0, null, 0, r.colors, 0, r.indices, r.groundIndexCount, r.carIndexCount, paint)
-    canvas.restoreToCount(layer)
-}
-
 private fun DrawScope.drawRouteLabel(text: String, measurer: TextMeasurer, cache: LabelCache, colors: PleosColors) {
     val maxWidth = (size.width * 0.8f).toInt().coerceAtLeast(1)
     if (cache.text != text || cache.maxWidth != maxWidth || cache.layout == null) {
@@ -240,17 +214,17 @@ private fun DrawScope.drawRouteLabel(text: String, measurer: TextMeasurer, cache
     val h = layout.size.height + 2f * padY
     val left = (size.width - w) / 2f
     val top = 28f
-    drawRoundRect(colors.surface.copy(alpha = 0.88f), Offset(left, top), Size(w, h), CornerRadius(h / 2f))
+    drawRoundRect(colors.surfaceHigh.copy(alpha = 0.92f), Offset(left, top), Size(w, h), CornerRadius(h / 2f))
     drawText(layout, color = colors.textSecondary, topLeft = Offset(left + padX, top + padY))
 }
 
-// ---- previews (Android Studio's layout renderer may not draw drawVertices; the emulator does) ---------------
+// ---- previews (the layout renderer may not show the blur glow; the emulator does) -----------------------------
 private val PREVIEW_INPUT = TopViewInput(
     speedMs = 12.0,
     speedAtMs = 0L,
     gear = GearState.DRIVE,
-    steeringDeg = -8.0,
-    brake = false,
+    steeringDeg = -12.0,
+    brake = true,
     turn = TurnState.LEFT,
     climateOn = true,
     socFraction = 0.72,
@@ -259,22 +233,12 @@ private val PREVIEW_INPUT = TopViewInput(
     restricted = true,
 )
 
-@Preview(name = "Top view, day", widthDp = 841, heightDp = 605)
+@Preview(name = "Top view, neon", widthDp = 841, heightDp = 605)
 @Composable
-private fun CarTopViewDayPreview() {
-    IfEvTheme(darkTheme = false) {
-        Box(Modifier.fillMaxSize().background(LocalPleosColors.current.background)) {
+private fun CarTopViewPreview() {
+    IfEvTheme {
+        Box(Modifier.fillMaxSize().background(LocalPleosColors.current.surface)) {
             CarTopView(PREVIEW_INPUT, Modifier.fillMaxSize(), routeLabel = "집 → 회사")
-        }
-    }
-}
-
-@Preview(name = "Top view, night", widthDp = 841, heightDp = 605)
-@Composable
-private fun CarTopViewNightPreview() {
-    IfEvTheme(darkTheme = true) {
-        Box(Modifier.fillMaxSize().background(LocalPleosColors.current.background)) {
-            CarTopView(PREVIEW_INPUT, Modifier.fillMaxSize())
         }
     }
 }

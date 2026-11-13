@@ -90,6 +90,34 @@ val PleosDark = PleosColors(
     fuelSoft = Color(0xFF3D2A0E),
 )
 
+/**
+ * The app's look (team design, 2026-11-13): near-black like the night cluster, one accent in the icon's
+ * cyan, cards a step lighter. Used day and night: a dark screen next to the navigation, with text kept
+ * at 4.5:1 or more (grey labels #8B95A1 on #121417 are about 6:1).
+ */
+val PleosNeon = PleosColors(
+    isDark = true,
+    background = Color(0xFF050607),
+    surface = Color(0xFF121417),
+    surfaceHigh = Color(0xFF1A1D21),
+    surfaceAccent = Color(0xFF262A30),
+    divider = Color(0xFF1E2126),
+    textPrimary = Color(0xFFFFFFFF),
+    textSecondary = Color(0xFFC9D1D9),
+    textTertiary = Color(0xFF8B95A1),
+    textQuaternary = Color(0xFF8B95A1),
+    buttonFilled = Color(0xFF1FD3F0),
+    onButtonFilled = Color(0xFF050607),
+    buttonBasic = Color(0xFF1A1D21),
+    active = Color(0xFF1FD3F0),
+    positive = Color(0xFF1FD3F0),
+    negative = Color(0xFFFF5A6A),
+    ev = Color(0xFF1FD3F0),
+    evSoft = Color(0xFF0A2A31),
+    fuel = Color(0xFFFFB020),
+    fuelSoft = Color(0xFF2A1F0B),
+)
+
 /** Pleos type scale (Headline 48–60, Title 32–40, Body 26–30, Label 20–24). Sizes are px at 160 dpi, so sp 1:1. */
 object PleosType {
     val display = TextStyle(fontSize = 96.sp, fontWeight = FontWeight.Bold, lineHeight = 104.sp)
@@ -107,11 +135,11 @@ object PleosType {
 
 val LocalPleosColors = staticCompositionLocalOf { PleosLight }
 
-/** Follows the car's day/night mode, as the design guide asks. */
+/** The neon look day and night (the team's design); [darkTheme] stays for previews of the old palettes. */
 @Composable
-fun IfEvTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    val colors = if (darkTheme) PleosDark else PleosLight
-    val scheme = if (darkTheme) {
+fun IfEvTheme(darkTheme: Boolean = isSystemInDarkTheme(), neon: Boolean = true, content: @Composable () -> Unit) {
+    val colors = if (neon) PleosNeon else if (darkTheme) PleosDark else PleosLight
+    val scheme = if (colors.isDark) {
         darkColorScheme(background = colors.background, surface = colors.surface, primary = colors.buttonFilled, onPrimary = colors.onButtonFilled)
     } else {
         lightColorScheme(background = colors.background, surface = colors.surface, primary = colors.buttonFilled, onPrimary = colors.onButtonFilled)
