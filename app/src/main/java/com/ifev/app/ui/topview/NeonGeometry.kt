@@ -11,17 +11,36 @@ import kotlin.math.sqrt
  */
 
 /** Same-colour constants for the neon look (the app is dark-only, so these do not follow the theme). */
-internal object NeonColors {
-    /** The cyan of the app icon. */
-    const val CYAN = 0xFF1FD3F0.toInt()
-    const val AMBER = 0xFFFFB020.toInt()
+/** The top view's colours. [DARK] is the team's neon design; [LIGHT] keeps it readable on a light screen. */
+internal class NeonPalette(
+    /** The outline: on dark, the cyan of the app icon. */
+    val line: Int,
+    val amber: Int,
     /** The bright centre of a lit lamp line. */
-    const val AMBER_CORE = 0xFFFFD27A.toInt()
-    const val RED = 0xFFFF2D2D.toInt()
-    const val RED_CORE = 0xFFFF8A80.toInt()
-
-    /** Body interior: almost black, so the cabin reads as dark glass on the card. */
-    const val BODY_FILL = 0xB8030405.toInt()
+    val amberCore: Int,
+    val red: Int,
+    val redCore: Int,
+    /** Body interior: dark glass on dark, frosted glass on light. */
+    val bodyFill: Int,
+    /** Strength of the wide and tight glow around the outline, and of the lane dashes. */
+    val glowWide: Float,
+    val glowTight: Float,
+    val lane: Float,
+    /** Strength of the soft lamp light on the ground. */
+    val ground: Float,
+) {
+    companion object {
+        val DARK = NeonPalette(
+            line = 0xFF1FD3F0.toInt(), amber = 0xFFFFB020.toInt(), amberCore = 0xFFFFD27A.toInt(),
+            red = 0xFFFF2D2D.toInt(), redCore = 0xFFFF8A80.toInt(), bodyFill = 0xB8030405.toInt(),
+            glowWide = 0.34f, glowTight = 0.70f, lane = 0.14f, ground = 1f,
+        )
+        val LIGHT = NeonPalette(
+            line = 0xFF0097B5.toInt(), amber = 0xFFF29D00.toInt(), amberCore = 0xFFD98200.toInt(),
+            red = 0xFFFF3B45.toInt(), redCore = 0xFFE0202C.toInt(), bodyFill = 0xF2FFFFFF.toInt(),
+            glowWide = 0.16f, glowTight = 0.32f, lane = 0.22f, ground = 0.75f,
+        )
+    }
 }
 
 /** A path as plain data: verbs and the coordinates they use, in order. */

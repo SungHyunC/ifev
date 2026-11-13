@@ -40,6 +40,7 @@ internal class NeonPainter {
     private var brakeShader: RadialGradient? = null
     private val turnShader = arrayOfNulls<RadialGradient>(4)
     private var lineW = 3f
+    private var pal = NeonPalette.DARK
 
     private fun build(sc: NeonScene) {
         val sh = sc.shapes
@@ -70,29 +71,32 @@ internal class NeonPainter {
 
         brakeShader = RadialGradient(
             sh.brakeGlowX, sh.brakeGlowY, sh.brakeGlowR,
-            intArrayOf(withA(NeonColors.RED, 0.62f), withA(NeonColors.RED, 0.22f), withA(NeonColors.RED, 0f)),
+            intArrayOf(withA(pal.red, 0.62f * pal.ground), withA(pal.red, 0.22f * pal.ground), withA(pal.red, 0f)),
             floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP,
         )
         for (i in 0 until 4) {
             turnShader[i] = RadialGradient(
                 sh.turnGlowX[i], sh.turnGlowY[i], sh.turnGlowR[i],
-                intArrayOf(withA(NeonColors.AMBER, 0.50f), withA(NeonColors.AMBER, 0.16f), withA(NeonColors.AMBER, 0f)),
+                intArrayOf(withA(pal.amber, 0.50f * pal.ground), withA(pal.amber, 0.16f * pal.ground), withA(pal.amber, 0f)),
                 floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP,
             )
         }
         built = sc.layoutVersion
+        builtPal = pal
     }
+    private var builtPal: NeonPalette? = null
 
-    fun draw(c: Canvas, sc: NeonScene) {
+    fun draw(c: Canvas, sc: NeonScene, palette: NeonPalette = NeonPalette.DARK) {
         if (!sc.ready) return
-        if (built != sc.layoutVersion) build(sc)
+        pal = palette
+        if (built != sc.layoutVersion || builtPal !== palette) build(sc)
         val sh = sc.shapes
         val a = sc.alpha
 
         // 1. Lane dashes, very faint.
         if (sc.laneCount > 0) {
-            line.color = NeonColors.CYAN
-            line.alpha = alpha(0.14f * a)
+            line.color = pal.line
+            line.alpha = alpha(pal.lane * a)
             line.strokeWidth = lineW * 0.8f
             c.drawLines(sc.laneLines, 0, sc.laneCount * 4, line)
             line.strokeWidth = lineW
@@ -113,13 +117,13 @@ internal class NeonPainter {
         }
         radial.shader = null
 
-        // 3. Dark glass body.
-        fill.color = NeonColors.BODY_FILL
+        // 3. Glass body (dark or frosted, by theme).
+        fill.color = pal.bodyFill
         fill.alpha = alpha(a * 0.72f)
         c.drawPath(staticPath, fill)
 
         // 4. Battery gauge, restrained: a faint fill rising in the cabin, empty cells above it.
-        val gc = if (sc.fillAmber) NeonColors.AMBER else NeonColors.CYAN
+        val gc = if (sc.fillAmber) pal.amber else pal.line
         if (sc.fillVisible) {
             fill.color = gc
             fill.alpha = alpha(0.10f * a)
@@ -140,7 +144,7 @@ internal class NeonPainter {
         // 5. Cabin airflow.
         for (i in 0 until 3) {
             if (sc.airAlpha[i] <= 0f) continue
-            line.color = NeonColors.CYAN
+            line.color = pal.line
             line.alpha = alpha(sc.airAlpha[i] * a)
             line.strokeWidth = lineW * 0.7f
             c.save()
@@ -157,14 +161,14 @@ internal class NeonPainter {
             matrix.postTranslate(sh.frontWheelX[w], sh.frontWheelY)
             dynPath.addPath(frontWheel, matrix)
         }
-        glowWide.color = NeonColors.CYAN
-        glowWide.alpha = alpha(0.34f * a)
+        glowWide.color = pal.line
+        glowWide.alpha = alpha(pal.glowWide * a)
         c.drawPath(staticPath, glowWide)
-        glowTight.color = NeonColors.CYAN
-        glowTight.alpha = alpha(0.70f * a)
+        glowTight.color = pal.line
+        glowTight.alpha = alpha(pal.glowTight * a)
         c.drawPath(staticPath, glowTight)
         c.drawPath(dynPath, glowTight)
-        line.color = NeonColors.CYAN
+        line.color = pal.line
         line.alpha = alpha(a)
         c.drawPath(staticPath, line)
         c.drawPath(dynPath, line)
@@ -174,15 +178,15 @@ internal class NeonPainter {
         line.strokeWidth = lineW
 
         // 7. Tread lines in the wheels.
-        treadPaint.color = NeonColors.CYAN
+        treadPaint.color = pal.line
         treadPaint.alpha = alpha(0.85f * a)
         c.drawLines(sc.treadLines, 0, sc.treadLines.size, treadPaint)
 
         // 8. Regeneration: light particles from the front wheels to the battery.
         if (sc.regenMid + sc.regenEdge > 0) {
-            dotGlow.color = NeonColors.CYAN
+            dotGlow.color = pal.line
             dotGlow.alpha = alpha(0.7f * sc.regenAlpha * a)
-            dot.color = NeonColors.CYAN
+            dot.color = pal.line
             if (sc.regenMid > 0) {
                 c.drawPoints(sc.regenPoints, 0, sc.regenMid * 2, dotGlow)
                 dot.alpha = alpha(sc.regenAlpha * a)
@@ -196,18 +200,18 @@ internal class NeonPainter {
 
         // 9. Lamp lines on the car.
         if (sc.brake > 0f) {
-            lampGlow.color = NeonColors.RED
+            lampGlow.color = pal.red
             lampGlow.alpha = alpha(a)
             c.drawPath(brakeLamps, lampGlow)
-            line.color = NeonColors.RED_CORE
+            line.color = pal.redCore
             line.alpha = alpha(a)
             line.strokeWidth = lineW * 1.4f
             c.drawPath(brakeLamps, line)
         }
         if (sc.turnLeft > 0f || sc.turnRight > 0f) {
-            lampGlow.color = NeonColors.AMBER
+            lampGlow.color = pal.amber
             lampGlow.alpha = alpha(a)
-            line.color = NeonColors.AMBER_CORE
+            line.color = pal.amberCore
             line.alpha = alpha(a)
             line.strokeWidth = lineW * 1.4f
             if (sc.turnLeft > 0f) { c.drawPath(arcLeft, lampGlow); c.drawPath(arcLeft, line) }

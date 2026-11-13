@@ -133,12 +133,36 @@ object PleosType {
     val labelSmall = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Normal, lineHeight = 28.sp)
 }
 
+/** The neon design on a light screen, for daytime: the same cyan, deepened so text and lines stay readable. */
+val PleosNeonLight = PleosColors(
+    isDark = false,
+    background = Color(0xFFF3F5F7),
+    surface = Color(0xFFFFFFFF),
+    surfaceHigh = Color(0xFFEBEEF2),
+    surfaceAccent = Color(0xFFDFE3E8),
+    divider = Color(0xFFE2E6EB),
+    textPrimary = Color(0xFF0B0D10),
+    textSecondary = Color(0xFF39414B),
+    textTertiary = Color(0xFF5E6772),
+    textQuaternary = Color(0xFF5E6772),
+    buttonFilled = Color(0xFF007C96),
+    onButtonFilled = Color(0xFFFFFFFF),
+    buttonBasic = Color(0xFFEBEEF2),
+    active = Color(0xFF007C96),
+    positive = Color(0xFF007C96),
+    negative = Color(0xFFD7263D),
+    ev = Color(0xFF00839E),
+    evSoft = Color(0xFFDDF4F9),
+    fuel = Color(0xFFA35F00),
+    fuelSoft = Color(0xFFFFF0D6),
+)
+
 val LocalPleosColors = staticCompositionLocalOf { PleosLight }
 
-/** The neon look day and night (the team's design); [darkTheme] stays for previews of the old palettes. */
+/** The neon design (the team's), dark or light with the car's day/night setting. [neon] false gives the old Pleos palettes. */
 @Composable
 fun IfEvTheme(darkTheme: Boolean = isSystemInDarkTheme(), neon: Boolean = true, content: @Composable () -> Unit) {
-    val colors = if (neon) PleosNeon else if (darkTheme) PleosDark else PleosLight
+    val colors = if (neon) { if (darkTheme) PleosNeon else PleosNeonLight } else if (darkTheme) PleosDark else PleosLight
     val scheme = if (colors.isDark) {
         darkColorScheme(background = colors.background, surface = colors.surface, primary = colors.buttonFilled, onPrimary = colors.onButtonFilled)
     } else {

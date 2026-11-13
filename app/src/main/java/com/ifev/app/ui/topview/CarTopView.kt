@@ -132,7 +132,7 @@ fun CarTopView(
                 }
                 if (frame.ready && scene.ready) {
                     scene.update(frame.state, frame.input, frame.animated, frame.nowMs)
-                    drawIntoCanvas { painter.draw(it.nativeCanvas, scene) }
+                    drawIntoCanvas { painter.draw(it.nativeCanvas, scene, if (colors.isDark) NeonPalette.DARK else NeonPalette.LIGHT) }
                     if (!routeLabel.isNullOrBlank()) drawRouteLabel(routeLabel, measurer, label, colors)
                 }
             }

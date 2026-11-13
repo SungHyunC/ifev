@@ -97,7 +97,7 @@ fun HomeScreen(ui: UiState, visual: com.ifev.app.MainViewModel.VisualNow, action
                         },
                         c.textTertiary, c.surfaceHigh,
                     )
-                    if (v.brake == true) Chip("브레이크", c.negative, Color(0xFF2A0F16))
+                    if (v.brake == true) Chip("브레이크", c.negative, if (c.isDark) Color(0xFF2A0F16) else Color(0xFFFDE4E7))
                     when (v.turn) {
                         TurnState.LEFT -> Chip("왼쪽 방향지시등", c.fuel, c.fuelSoft)
                         TurnState.RIGHT -> Chip("오른쪽 방향지시등", c.fuel, c.fuelSoft)
