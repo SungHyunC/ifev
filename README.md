@@ -6,7 +6,7 @@
 내 생활에 전기차가 맞는지, 무엇이 바뀌면 맞게 되는지 차 안의 순간마다 알려 줍니다.</p>
 
 <p align="center">
-<a href="https://github.com/SungHyunC/ifev/releases/download/demo-2026-11-12/IfEV_demo.mp4"><b>▶ 시연 영상 (5분 27초)</b></a> ·
+<a href="https://github.com/SungHyunC/ifev/releases/download/demo-2026-11-12/IfEV_demo.mp4"><b>▶ 시연 영상 (5분 3초)</b></a> ·
 <a href="https://github.com/SungHyunC/ifev/releases/download/demo-2026-11-12/IfEV_release.apk"><b>APK 받기</b></a> ·
 <a href="#실행-방법">실행 방법</a> ·
 <a href="docs/공개데이터_검증.md">공개 데이터 검증</a>
@@ -271,11 +271,11 @@ app/src/main/java/com/ifev/app/
 
 ## 시연 자료
 - 시연 모드의 2~4주 기록은 가상 데이터입니다. 화면 상단과 4주 리포트에 "시연용 가상 데이터", "가상 기록 28일"로 표시하고 신뢰도는 붙이지 않습니다. 실시간 모드의 기록만 실제 주행입니다.
-- `demo/IfEV_demo.mp4` (약 5분 27초, 시연 화면은 앱 부분을 확대): 에뮬레이터 화면 녹화(`adb shell screenrecord`)에 한국어 해설과 자막을 넣은 영상입니다. 순서는 다음과 같습니다.
+- `demo/IfEV_demo.mp4` (약 5분 3초, 시연 화면은 앱 부분을 확대, 시연은 밝은 테마·실시간 주행은 어두운 테마): 에뮬레이터 화면 녹화(`adb shell screenrecord`)에 한국어 해설과 자막을 넣은 영상입니다. 순서는 다음과 같습니다.
   1. 문제 제기
   2. 리포트: 설치 직후 예비 진단과 집 충전 없음 판정, 차가 알려 준 것
-  3. 메인: 시연 출근길(가상 전기차 탑뷰, 감속 때 회생 빛, 정차 음성)
-  4. 실시간: 에뮬레이터 내비에서 강릉을 찍는 순간의 Pleos 음성 → Virtual Console로 D 주행(1초에 한 번 갱신, 조향·브레이크등·지시등) → P → 방금 주행 다시 보기
+  3. 메인: 시연 출근길(가상 전기차 탑뷰, 브레이크·방향지시등·회생 입자, 정차 음성)
+  4. 실시간(야간 모드, 어두운 테마): 에뮬레이터 내비에서 강릉을 찍는 순간의 Pleos 음성 → Virtual Console로 D 주행(1초에 한 번 갱신, 조향·브레이크등·지시등) → P → 방금 주행 다시 보기
   5. 4주 리포트, 1월이라면, 주유하는 순간
   6. 집 충전 없음 → 판정을 바꾸는 한 가지(회사 주차장 충전기)
   7. 공개 실주행 데이터셋 VED의 가솔린차 4주
