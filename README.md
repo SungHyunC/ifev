@@ -283,4 +283,4 @@ app/src/main/java/com/ifev/app/
 - `demo/*.png`: 화면 캡처 19장(현재 빌드, 01~15 어두운 테마, 16~19 밝은 테마)
 
 ## APK
-- `apk/IfEV_release.apk` (release 빌드, 시연용으로 debug 키 서명). 제출 시 `팀명_이프EV_release.apk`로 이름을 바꿉니다.
+- [`apk/이프EV_이프EV_release.apk`](apk/) (release 빌드, 공모전 규칙 `팀명_앱이름_release.apk`. 시연용이라 debug 키로 서명). 같은 파일을 [GitHub Release](https://github.com/SungHyunC/ifev/releases/tag/demo-2026-11-12)에도 `IfEV_release.apk`로 올려 두었습니다.
